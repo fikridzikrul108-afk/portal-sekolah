@@ -523,11 +523,13 @@ const emptyUserProfile: UserProfile = {
   fotoUrl: "",
 };
 
+const SCHOOL_LOGO_URL = "/logo-sd.png";
+
 const emptySchoolSettings: SchoolSettings = {
   namaSekolah: "SD Islam Al-Barkah",
   npsn: "", nss: "", alamat: "", desaKelurahan: "", kecamatan: "",
   kabupatenKota: "", provinsi: "", kodePos: "", telepon: "", email: "", website: "",
-  namaKepalaSekolah: "", nipKepalaSekolah: "", tahunAjaran: "2026/2027", semester: "1", logoUrl: "",
+  namaKepalaSekolah: "", nipKepalaSekolah: "", tahunAjaran: "2026/2027", semester: "1", logoUrl: SCHOOL_LOGO_URL,
 };
 
 export default function Home() {
@@ -543,6 +545,9 @@ export default function Home() {
   const [navigationLoading, setNavigationLoading] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
+  const [welcomeVisible, setWelcomeVisible] = useState(false);
+  const [welcomeName, setWelcomeName] = useState("");
+  const [welcomeRole, setWelcomeRole] = useState<Role>("Siswa");
 
   const [selectedSemester, setSelectedSemester] = useState("1");
   const [selectedReportClass, setSelectedReportClass] = useState("6A");
@@ -687,37 +692,100 @@ export default function Home() {
   useEffect(() => {
     if (!currentUserId) return;
 
-    const storageKey = `portal-profile-${currentUserId}`;
-    try {
-      const stored = window.localStorage.getItem(storageKey);
-      if (stored) {
-        const parsed = JSON.parse(stored) as Partial<UserProfile>;
+    const loadUserProfile = async () => {
+      const { data: authData } = await supabase.auth.getUser();
+      const authEmail = authData.user?.email ?? "";
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, nama, role, email, no_hp, tempat_lahir, tanggal_lahir, jenis_kelamin, alamat, bio, foto_url")
+        .eq("id", currentUserId)
+        .maybeSingle();
+
+      if (error) {
+        console.error("Gagal memuat profil pribadi:", error);
+        setUserProfile((current) => ({ ...current, nama: name, email: authEmail || current.email }));
+        return;
+      }
+
+      if (data) {
         setUserProfile({
-          ...emptyUserProfile,
-          ...parsed,
-          nama: parsed.nama || name,
-          email: parsed.email || "",
+          nama: data.nama ?? name,
+          email: data.email ?? authEmail,
+          noHp: data.no_hp ?? "",
+          tempatLahir: data.tempat_lahir ?? "",
+          tanggalLahir: data.tanggal_lahir ?? "",
+          jenisKelamin: data.jenis_kelamin === "Laki-laki" || data.jenis_kelamin === "Perempuan" ? data.jenis_kelamin : "",
+          alamat: data.alamat ?? "",
+          bio: data.bio ?? "",
+          fotoUrl: data.foto_url ?? "",
         });
       } else {
-        setUserProfile((current) => ({ ...current, nama: name }));
+        setUserProfile((current) => ({ ...current, nama: name, email: authEmail || current.email }));
       }
-    } catch {
-      setUserProfile((current) => ({ ...current, nama: name }));
-    }
+    };
+
+    void loadUserProfile();
   }, [currentUserId, name]);
 
   const saveUserProfile = async () => {
-    if (!currentUserId) return;
+    if (!currentUserId) {
+      alert("Sesi login tidak ditemukan. Silakan login kembali.");
+      return;
+    }
+
+    if (!userProfile.nama.trim()) {
+      alert("Nama lengkap wajib diisi.");
+      return;
+    }
+
     setProfileSaving(true);
     setProfileSaved(false);
 
     try {
-      window.localStorage.setItem(`portal-profile-${currentUserId}`, JSON.stringify(userProfile));
-      setName(userProfile.nama.trim() || name);
+      const payload = {
+        nama: userProfile.nama.trim(),
+        email: userProfile.email.trim() || null,
+        no_hp: userProfile.noHp.trim() || null,
+        tempat_lahir: userProfile.tempatLahir.trim() || null,
+        tanggal_lahir: userProfile.tanggalLahir || null,
+        jenis_kelamin: userProfile.jenisKelamin || null,
+        alamat: userProfile.alamat.trim() || null,
+        bio: userProfile.bio.trim() || null,
+        foto_url: userProfile.fotoUrl || null,
+      };
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .update(payload)
+        .eq("id", currentUserId)
+        .select("id, nama, role, email, no_hp, tempat_lahir, tanggal_lahir, jenis_kelamin, alamat, bio, foto_url")
+        .single();
+
+      if (error) {
+        console.error("Profil gagal disimpan:", error);
+        alert(`Profil gagal disimpan: ${error.message}`);
+        return;
+      }
+
+      setUserProfile({
+        nama: data.nama ?? userProfile.nama,
+        email: data.email ?? userProfile.email,
+        noHp: data.no_hp ?? "",
+        tempatLahir: data.tempat_lahir ?? "",
+        tanggalLahir: data.tanggal_lahir ?? "",
+        jenisKelamin: data.jenis_kelamin === "Laki-laki" || data.jenis_kelamin === "Perempuan" ? data.jenis_kelamin : "",
+        alamat: data.alamat ?? "",
+        bio: data.bio ?? "",
+        fotoUrl: data.foto_url ?? "",
+      });
+      setName(data.nama ?? userProfile.nama);
       setProfileSaved(true);
       window.setTimeout(() => setProfileSaved(false), 2500);
-    } catch {
-      alert("Profil belum bisa disimpan di browser ini.");
+      alert("Profil berhasil disimpan ke database. ✅");
+    } catch (error) {
+      console.error("Gagal menyimpan profil:", error);
+      alert(error instanceof Error ? error.message : "Profil gagal disimpan.");
     } finally {
       setProfileSaving(false);
     }
@@ -2337,6 +2405,12 @@ export default function Home() {
       setSelectedSubject(null);
       setSelectedClass(null);
       setSelectedDay(null);
+
+      // Tampilkan sambutan premium setelah akun berhasil masuk.
+      setWelcomeName(profile.nama ?? "");
+      setWelcomeRole(resolvedRole);
+      setWelcomeVisible(true);
+      window.setTimeout(() => setWelcomeVisible(false), 2600);
     } finally {
       setLoginLoading(false);
     }
@@ -2353,6 +2427,8 @@ export default function Home() {
     setActiveMenu("Dashboard");
     setSelectedSubject(null);
     setSelectedClass(null);
+    setWelcomeVisible(false);
+    setWelcomeName("");
     setSelectedDay(null);
     setIsWaliKelas(false);
     setCurrentUserId(null);
@@ -2678,7 +2754,7 @@ export default function Home() {
         namaKepalaSekolah: data.nama_kepala_sekolah ?? "", nipKepalaSekolah: data.nip_kepala_sekolah ?? "",
         tahunAjaran: data.tahun_ajaran ?? "2026/2027",
         semester: data.semester === "2" ? "2" : "1",
-        logoUrl: data.logo_url ?? "",
+        logoUrl: SCHOOL_LOGO_URL,
       });
     }
     setSchoolSettingsLoading(false);
@@ -2686,41 +2762,7 @@ export default function Home() {
 
   const handleSchoolLogoUpload = async (file: File | undefined) => {
     if (!file || role !== "Admin") return;
-    if (!file.type.startsWith("image/")) {
-      alert("Pilih file gambar untuk logo sekolah.");
-      return;
-    }
-    if (file.size > 2 * 1024 * 1024) {
-      alert("Ukuran logo maksimal 2 MB.");
-      return;
-    }
-
-    setSchoolSettingsSaving(true);
-    setSchoolSettingsSaved(false);
-
-    const extension = file.name.split(".").pop()?.toLowerCase() || "png";
-    const path = `school-logo/logo-${Date.now()}.${extension}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("school-assets")
-      .upload(path, file, {
-        cacheControl: "3600",
-        upsert: true,
-        contentType: file.type,
-      });
-
-    if (uploadError) {
-      setSchoolSettingsSaving(false);
-      alert(`Logo gagal diupload: ${uploadError.message}`);
-      return;
-    }
-
-    const { data } = supabase.storage.from("school-assets").getPublicUrl(path);
-    const publicUrl = data.publicUrl;
-
-    setSchoolSettings((current) => ({ ...current, logoUrl: publicUrl }));
-    setSchoolSettingsSaving(false);
-    setSchoolSettingsSaved(false);
+    alert("Logo Portal sudah dipasang langsung dari file lokal public/logo-sd.png. Bucket Supabase tidak diperlukan untuk logo ini.");
   };
 
   const saveSchoolSettings = async () => {
@@ -2748,7 +2790,7 @@ export default function Home() {
       nip_kepala_sekolah: schoolSettings.nipKepalaSekolah.trim() || null,
       tahun_ajaran: schoolSettings.tahunAjaran.trim() || "2026/2027",
       semester: schoolSettings.semester,
-      logo_url: schoolSettings.logoUrl.trim() || null,
+      logo_url: SCHOOL_LOGO_URL,
       updated_by: currentUserId,
       updated_at: new Date().toISOString(),
     });
@@ -3169,17 +3211,6 @@ export default function Home() {
     await loadTeacherData();
   };
 
-  useEffect(() => {
-    if (!mobileMenuOpen) return;
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMobileMenuOpen(false);
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mobileMenuOpen]);
-
   const openMenu = async (menuName: string) => {
     setMobileMenuOpen(false);
     setNavigationLoading(true);
@@ -3242,7 +3273,9 @@ export default function Home() {
           <section className="hidden flex-col justify-between p-10 text-white lg:flex xl:p-14">
             <div>
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 text-xl font-black ring-1 ring-white/15 backdrop-blur">AB</div>
+                <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-white/95 ring-1 ring-white/20 backdrop-blur">
+                  <img src={SCHOOL_LOGO_URL} alt="Logo SD Islam Al-Barkah" className="h-full w-full object-contain" />
+                </div>
                 <div>
                   <p className="text-lg font-bold tracking-wide">SD Islam Al-Barkah</p>
                   <p className="text-sm text-slate-400">Portal Akademik Sekolah</p>
@@ -3281,7 +3314,9 @@ export default function Home() {
           <section className="flex items-center justify-center p-5 sm:p-8 lg:p-10">
             <div className="w-full max-w-md animate-[fadeIn_.45s_ease-out]">
               <div className="mb-6 text-center lg:hidden">
-                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-500 text-xl font-black text-white shadow-lg shadow-emerald-500/20">AB</div>
+                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-white shadow-lg shadow-emerald-500/20 ring-1 ring-white/20">
+                  <img src={SCHOOL_LOGO_URL} alt="Logo SD Islam Al-Barkah" className="h-full w-full object-contain" />
+                </div>
                 <h1 className="text-xl font-bold text-white">SD Islam Al-Barkah</h1>
                 <p className="mt-1 text-sm text-slate-400">Portal Akademik Sekolah</p>
               </div>
@@ -3312,7 +3347,7 @@ export default function Home() {
 
                   <button onClick={login} disabled={loginLoading} className="group relative w-full overflow-hidden rounded-2xl bg-emerald-600 py-3.5 font-bold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 hover:shadow-emerald-600/30 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60">
                     <span className="relative z-10 flex items-center justify-center gap-2">
-                      {loginLoading ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> Menyiapkan Portal...</> : <>Masuk ke Portal <span className="transition-transform group-hover:translate-x-1">→</span></>}
+                      {loginLoading ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> Mohon tunggu...</> : <>Masuk ke Portal <span className="transition-transform group-hover:translate-x-1">→</span></>}
                     </span>
                   </button>
                 </div>
@@ -3373,16 +3408,13 @@ export default function Home() {
   return (
     <>
       {showPageLoader && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/25 p-6 backdrop-blur-[3px]">
+        <div className="pointer-events-none fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/25 p-6 backdrop-blur-[3px]">
           <div className="flex min-w-[220px] flex-col items-center rounded-3xl border border-white/70 bg-white/95 px-8 py-7 shadow-2xl shadow-slate-900/15">
             <div className="relative flex h-14 w-14 items-center justify-center">
               <span className="absolute inset-0 rounded-full border-4 border-emerald-100" />
               <span className="absolute inset-0 animate-spin rounded-full border-4 border-transparent border-t-emerald-600 border-r-emerald-400" />
-              <span className="text-sm font-black text-emerald-700">AB</span>
             </div>
-            <p className="mt-4 text-sm font-bold text-slate-800">
-              {loginLoading ? "Menyiapkan portal..." : "Memuat halaman..."}
-            </p>
+            <p className="mt-4 text-sm font-bold text-slate-800">Mohon tunggu...</p>
             <div className="mt-3 flex items-center gap-1.5">
               <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-emerald-500 [animation-delay:-0.3s]" />
               <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-emerald-500 [animation-delay:-0.15s]" />
@@ -3391,12 +3423,17 @@ export default function Home() {
           </div>
         </div>
       )}
+
       <style jsx global>{`
+        @keyframes logoFloat { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-5px) scale(1.025); } }
+        @keyframes logoRing { 0% { transform: scale(.72); opacity: .8; } 75%, 100% { transform: scale(1.35); opacity: 0; } }
+        @keyframes dotPulse { 0%, 70%, 100% { transform: translateY(0) scale(.75); opacity: .45; } 35% { transform: translateY(-3px) scale(1); opacity: 1; } }
+        @keyframes welcomeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes welcomeLogo { 0% { opacity: 0; transform: translateY(18px) scale(.7) rotate(-8deg); } 65% { transform: translateY(-4px) scale(1.04) rotate(1deg); } 100% { opacity: 1; transform: translateY(0) scale(1) rotate(0); } }
+        @keyframes welcomeText { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes welcomeOrbit { from { transform: translate(-50%, -50%) rotate(0deg); } to { transform: translate(-50%, -50%) rotate(360deg); } }
+        @keyframes welcomeOrbitReverse { from { transform: translate(-50%, -50%) rotate(360deg); } to { transform: translate(-50%, -50%) rotate(0deg); } }
         .printable-report { display: none; }
-        button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
-        @media (max-width: 1023px) {
-          button, a { touch-action: manipulation; }
-        }
         @media print {
           @page { size: A4 portrait; margin: 10mm; }
           html, body { background: #fff !important; }
@@ -3465,112 +3502,36 @@ export default function Home() {
         }
       `}</style>
       <div className="min-h-screen bg-slate-50 text-slate-900">
-        {mobileMenuOpen && (
-          <>
-            <button
-              type="button"
-              aria-label="Tutup menu"
-              className="fixed inset-0 z-[50] bg-slate-950/40 backdrop-blur-[2px] lg:hidden"
-              onClick={() => setMobileMenuOpen(false)}
-            />
-            <aside
-              className="fixed inset-y-0 left-0 z-[60] flex w-[min(86vw,340px)] flex-col border-r border-slate-200 bg-white shadow-2xl lg:hidden"
-              aria-label="Menu navigasi mobile"
-            >
-              <div className="flex h-20 shrink-0 items-center justify-between border-b border-slate-100 px-5">
-                <div className="flex min-w-0 items-center gap-3">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-900 font-bold text-white shadow-sm">AB</div>
-                  <div className="min-w-0">
-                    <h1 className="truncate text-sm font-bold text-slate-900">SD Islam Al-Barkah</h1>
-                    <p className="truncate text-xs text-slate-500">Portal Akademik</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  aria-label="Tutup menu"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-xl text-slate-700 shadow-sm active:scale-95"
-                >
-                  ×
-                </button>
-              </div>
-
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 pb-8">
-                <p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Menu Utama</p>
-                <nav className="space-y-1.5">
-                  {visibleMenuItems.map((item) => (
-                    <button
-                      key={`mobile-${item.name}`}
-                      type="button"
-                      onClick={() => openMenu(item.name)}
-                      className={`flex min-h-12 w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-semibold transition active:scale-[0.99] ${
-                        activeMenu === item.name
-                          ? "bg-slate-900 text-white shadow-sm"
-                          : "text-slate-700 hover:bg-slate-50"
-                      }`}
-                    >
-                      <span className="w-7 shrink-0 text-center text-lg">{item.icon}</span>
-                      <span className="truncate">{item.name}</span>
-                    </button>
-                  ))}
-                </nav>
-
-                <div className="mt-6 border-t border-slate-100 pt-5">
-                  <div className="mb-3 rounded-xl bg-slate-50 p-3">
-                    <p className="truncate text-xs font-semibold text-slate-700">{name}</p>
-                    <p className="mt-0.5 truncate text-[11px] text-slate-500">{role}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={logout}
-                    className="flex min-h-12 w-full items-center rounded-xl px-4 py-3 text-left text-sm font-semibold text-slate-600 transition hover:bg-red-50 hover:text-red-600 active:scale-[0.99]"
-                  >
-                    ⇥ Keluar dari Portal
-                  </button>
-                </div>
-              </div>
-            </aside>
-          </>
-        )}
-
       <aside className="fixed left-0 top-0 z-30 hidden h-screen w-72 border-r border-slate-200 bg-white shadow-[4px_0_24px_rgba(15,23,42,0.04)] lg:block">
         <div className="flex h-20 items-center gap-3 border-b border-slate-100 px-6">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 font-bold text-white shadow-sm">
-            AB
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+            <img src={SCHOOL_LOGO_URL} alt="Logo SD Islam Al-Barkah" className="h-full w-full object-contain" />
           </div>
-
           <div className="min-w-0">
-            <h1 className="truncate text-sm font-bold text-slate-900">
-              SD Islam Al-Barkah
-            </h1>
-
-            <p className="text-xs text-slate-500">
-              Academic Management System
-            </p>
+            <h1 className="truncate text-sm font-bold text-slate-900">SD Islam Al-Barkah</h1>
+            <p className="text-xs text-slate-500">Academic Management System</p>
           </div>
         </div>
 
         <div className="px-4 pt-6">
           <p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Menu Utama</p>
-        <nav className="space-y-1">
-          {visibleMenuItems.map((item) => (
-            <button
-              key={item.name}
-              onClick={() => openMenu(item.name)}
-              className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-all ${
-                activeMenu === item.name
-                  ? "bg-slate-900 text-white shadow-sm"
-                  : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-              }`}
-            >
-              <span className="w-6 text-center">
-                {item.icon}
-              </span>
-
-              {item.name}
-            </button>
-          ))}
-        </nav>
+          <nav className="space-y-1">
+            {visibleMenuItems.map((item) => (
+              <button
+                key={item.name}
+                type="button"
+                onClick={() => openMenu(item.name)}
+                className={`group flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-all touch-manipulation ${
+                  activeMenu === item.name
+                    ? "bg-slate-900 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                }`}
+              >
+                <span className="w-6 text-center">{item.icon}</span>
+                {item.name}
+              </button>
+            ))}
+          </nav>
         </div>
 
         <div className="absolute bottom-0 w-full border-t border-slate-100 p-4">
@@ -3578,40 +3539,88 @@ export default function Home() {
             <p className="truncate text-xs font-semibold text-slate-700">{name}</p>
             <p className="mt-0.5 truncate text-[11px] text-slate-500">{role}</p>
           </div>
-          <button
-            onClick={logout}
-            className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-500 transition hover:bg-red-50 hover:text-red-600"
-          >
+          <button type="button" onClick={logout} className="min-h-11 w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-500 transition hover:bg-red-50 hover:text-red-600 touch-manipulation">
+            ⇥ Keluar dari Portal
+          </button>
+        </div>
+      </aside>
+
+      {mobileMenuOpen && (
+        <button
+          type="button"
+          aria-label="Tutup menu"
+          onClick={() => setMobileMenuOpen(false)}
+          className="fixed inset-0 z-40 bg-slate-950/40 lg:hidden"
+        />
+      )}
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex w-[min(88vw,320px)] flex-col border-r border-slate-200 bg-white shadow-2xl transition-transform duration-200 lg:hidden ${
+          mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="flex h-20 shrink-0 items-center justify-between border-b border-slate-100 px-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+              <img src={SCHOOL_LOGO_URL} alt="Logo SD Islam Al-Barkah" className="h-full w-full object-contain" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="truncate text-sm font-bold text-slate-900">SD Islam Al-Barkah</h1>
+              <p className="text-[11px] text-slate-500">{role}</p>
+            </div>
+          </div>
+          <button type="button" onClick={() => setMobileMenuOpen(false)} aria-label="Tutup menu" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-2xl text-slate-500 hover:bg-slate-100 touch-manipulation">×</button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5">
+          <p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Menu Utama</p>
+          <nav className="space-y-1.5">
+            {visibleMenuItems.map((item) => (
+              <button
+                key={item.name}
+                type="button"
+                onClick={() => openMenu(item.name)}
+                className={`group flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition-all touch-manipulation active:scale-[0.99] ${
+                  activeMenu === item.name
+                    ? "bg-slate-900 text-white shadow-sm"
+                    : "text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+                }`}
+              >
+                <span className="flex w-7 shrink-0 items-center justify-center text-base">{item.icon}</span>
+                <span className="truncate">{item.name}</span>
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        <div className="shrink-0 border-t border-slate-100 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div className="mb-3 rounded-xl bg-slate-50 p-3">
+            <p className="truncate text-xs font-semibold text-slate-700">{name}</p>
+            <p className="mt-0.5 truncate text-[11px] text-slate-500">{role}</p>
+          </div>
+          <button type="button" onClick={logout} className="min-h-12 w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-slate-500 transition hover:bg-red-50 hover:text-red-600 touch-manipulation">
             ⇥ Keluar dari Portal
           </button>
         </div>
       </aside>
 
       <main className="lg:pl-72">
-        <header className="sticky top-0 z-20 flex h-20 items-center justify-between border-b border-slate-200 bg-white/95 px-4 shadow-[0_1px_12px_rgba(15,23,42,0.03)] backdrop-blur-xl sm:px-8">
+        <header className="sticky top-0 z-20 flex h-20 items-center justify-between border-b border-slate-200 bg-white/90 px-4 shadow-[0_1px_12px_rgba(15,23,42,0.03)] backdrop-blur-xl sm:px-8">
           <div className="flex min-w-0 items-center gap-3">
-            <button
-              type="button"
-              aria-label="Buka menu"
-              aria-expanded={mobileMenuOpen}
-              onClick={() => setMobileMenuOpen(true)}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-xl text-slate-800 shadow-sm active:scale-95 lg:hidden"
-            >
-              ☰
-            </button>
-            <div className="min-w-0">
+            <button type="button" onClick={() => setMobileMenuOpen(true)} aria-label="Buka menu" aria-expanded={mobileMenuOpen} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-xl text-slate-700 shadow-sm hover:bg-slate-50 touch-manipulation lg:hidden">☰</button>
+          <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
               <span>Portal Sekolah</span>
               <span>/</span>
               <span className="text-slate-600">{activeMenu}</span>
             </div>
-            <h2 className="mt-1 truncate text-xl font-bold tracking-tight text-slate-900">
+            <h2 className="mt-1 text-xl font-bold tracking-tight text-slate-900">
               {activeMenu}
             </h2>
-            </div>
+          </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-3">
+          <div className="flex items-center gap-3">
             <div className="hidden text-right sm:block">
               <p className="text-sm font-semibold text-slate-800">{name}</p>
               <p className="text-xs text-slate-500">{role}</p>
@@ -3630,7 +3639,7 @@ export default function Home() {
           </div>
         </header>
 
-        <div className="p-4 pb-24 sm:p-8 sm:pb-8">
+        <div className="p-5 sm:p-8">
           {activeMenu === "Profil Saya" && (
             <div className="mx-auto max-w-5xl space-y-6">
               <div className="overflow-hidden rounded-3xl bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-900 p-6 text-white shadow-xl sm:p-8">
@@ -6093,19 +6102,13 @@ export default function Home() {
                     <div className="border-b bg-gradient-to-r from-rose-50 to-white px-6 py-5"><div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-rose-500 text-xl text-white">🖼️</div><div><h3 className="font-bold">Logo Sekolah</h3><p className="text-sm text-gray-500">Logo ini akan otomatis digunakan pada kop raport.</p></div></div></div>
                     <div className="p-6">
                       <div className="flex flex-col gap-5 md:flex-row md:items-center">
-                        <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 text-2xl font-black text-emerald-700">{schoolSettings.logoUrl ? <img src={schoolSettings.logoUrl} alt="Preview logo" className="h-full w-full object-contain" /> : "AB"}</div>
+                        <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-gray-200 bg-white">
+                          <img src={SCHOOL_LOGO_URL} alt="Logo SD Islam Al-Barkah" className="h-full w-full object-contain" />
+                        </div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold text-gray-700">Upload Logo Sekolah</p>
-                          <div className="mt-2 flex flex-wrap items-center gap-3">
-                            <label className={`inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100 ${role !== "Admin" ? "pointer-events-none opacity-50" : ""}`}>
-                              📤 Pilih Gambar
-                              <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={role !== "Admin"} onChange={(e) => handleSchoolLogoUpload(e.target.files?.[0])} />
-                            </label>
-                            {schoolSettings.logoUrl && role === "Admin" && (
-                              <button type="button" onClick={() => setSchoolSettings((current) => ({ ...current, logoUrl: "" }))} className="rounded-2xl border border-rose-200 px-4 py-3 text-sm font-bold text-rose-600 transition hover:bg-rose-50">Hapus Logo</button>
-                            )}
-                          </div>
-                          <p className="mt-2 text-xs text-gray-400">PNG, JPG, atau WEBP. Maksimal 2 MB. Pilih gambar dari perangkat, lalu klik Simpan Pengaturan.</p>
+                          <p className="text-sm font-semibold text-gray-700">Logo Portal Sekolah</p>
+                          <p className="mt-1 text-sm leading-6 text-gray-500">Logo SD Islam Al-Barkah sudah dipasang langsung dari <span className="font-semibold">public/logo-sd.png</span>, sehingga tidak membutuhkan bucket Supabase Storage.</p>
+                          <p className="mt-2 text-xs text-gray-400">Jika nanti ingin mengganti logo, cukup ganti file <span className="font-semibold">public/logo-sd.png</span> dengan file logo baru menggunakan nama yang sama.</p>
                         </div>
                       </div>
                     </div>
