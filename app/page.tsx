@@ -541,6 +541,7 @@ export default function Home() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
   const [navigationLoading, setNavigationLoading] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
 
   const [selectedSemester, setSelectedSemester] = useState("1");
@@ -3168,7 +3169,19 @@ export default function Home() {
     await loadTeacherData();
   };
 
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileMenuOpen(false);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileMenuOpen]);
+
   const openMenu = async (menuName: string) => {
+    setMobileMenuOpen(false);
     setNavigationLoading(true);
     setActiveMenu(menuName);
 
@@ -3380,6 +3393,10 @@ export default function Home() {
       )}
       <style jsx global>{`
         .printable-report { display: none; }
+        button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+        @media (max-width: 1023px) {
+          button, a { touch-action: manipulation; }
+        }
         @media print {
           @page { size: A4 portrait; margin: 10mm; }
           html, body { background: #fff !important; }
@@ -3448,6 +3465,74 @@ export default function Home() {
         }
       `}</style>
       <div className="min-h-screen bg-slate-50 text-slate-900">
+        {mobileMenuOpen && (
+          <>
+            <button
+              type="button"
+              aria-label="Tutup menu"
+              className="fixed inset-0 z-[50] bg-slate-950/40 backdrop-blur-[2px] lg:hidden"
+              onClick={() => setMobileMenuOpen(false)}
+            />
+            <aside
+              className="fixed inset-y-0 left-0 z-[60] flex w-[min(86vw,340px)] flex-col border-r border-slate-200 bg-white shadow-2xl lg:hidden"
+              aria-label="Menu navigasi mobile"
+            >
+              <div className="flex h-20 shrink-0 items-center justify-between border-b border-slate-100 px-5">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-900 font-bold text-white shadow-sm">AB</div>
+                  <div className="min-w-0">
+                    <h1 className="truncate text-sm font-bold text-slate-900">SD Islam Al-Barkah</h1>
+                    <p className="truncate text-xs text-slate-500">Portal Akademik</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Tutup menu"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-xl text-slate-700 shadow-sm active:scale-95"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 pb-8">
+                <p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Menu Utama</p>
+                <nav className="space-y-1.5">
+                  {visibleMenuItems.map((item) => (
+                    <button
+                      key={`mobile-${item.name}`}
+                      type="button"
+                      onClick={() => openMenu(item.name)}
+                      className={`flex min-h-12 w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-semibold transition active:scale-[0.99] ${
+                        activeMenu === item.name
+                          ? "bg-slate-900 text-white shadow-sm"
+                          : "text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      <span className="w-7 shrink-0 text-center text-lg">{item.icon}</span>
+                      <span className="truncate">{item.name}</span>
+                    </button>
+                  ))}
+                </nav>
+
+                <div className="mt-6 border-t border-slate-100 pt-5">
+                  <div className="mb-3 rounded-xl bg-slate-50 p-3">
+                    <p className="truncate text-xs font-semibold text-slate-700">{name}</p>
+                    <p className="mt-0.5 truncate text-[11px] text-slate-500">{role}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={logout}
+                    className="flex min-h-12 w-full items-center rounded-xl px-4 py-3 text-left text-sm font-semibold text-slate-600 transition hover:bg-red-50 hover:text-red-600 active:scale-[0.99]"
+                  >
+                    ⇥ Keluar dari Portal
+                  </button>
+                </div>
+              </div>
+            </aside>
+          </>
+        )}
+
       <aside className="fixed left-0 top-0 z-30 hidden h-screen w-72 border-r border-slate-200 bg-white shadow-[4px_0_24px_rgba(15,23,42,0.04)] lg:block">
         <div className="flex h-20 items-center gap-3 border-b border-slate-100 px-6">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 font-bold text-white shadow-sm">
@@ -3503,19 +3588,30 @@ export default function Home() {
       </aside>
 
       <main className="lg:pl-72">
-        <header className="sticky top-0 z-20 flex h-20 items-center justify-between border-b border-slate-200 bg-white/90 px-5 shadow-[0_1px_12px_rgba(15,23,42,0.03)] backdrop-blur-xl sm:px-8">
-          <div>
+        <header className="sticky top-0 z-20 flex h-20 items-center justify-between border-b border-slate-200 bg-white/95 px-4 shadow-[0_1px_12px_rgba(15,23,42,0.03)] backdrop-blur-xl sm:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              aria-label="Buka menu"
+              aria-expanded={mobileMenuOpen}
+              onClick={() => setMobileMenuOpen(true)}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-xl text-slate-800 shadow-sm active:scale-95 lg:hidden"
+            >
+              ☰
+            </button>
+            <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
               <span>Portal Sekolah</span>
               <span>/</span>
               <span className="text-slate-600">{activeMenu}</span>
             </div>
-            <h2 className="mt-1 text-xl font-bold tracking-tight text-slate-900">
+            <h2 className="mt-1 truncate text-xl font-bold tracking-tight text-slate-900">
               {activeMenu}
             </h2>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-3">
             <div className="hidden text-right sm:block">
               <p className="text-sm font-semibold text-slate-800">{name}</p>
               <p className="text-xs text-slate-500">{role}</p>
@@ -3534,7 +3630,7 @@ export default function Home() {
           </div>
         </header>
 
-        <div className="p-5 sm:p-8">
+        <div className="p-4 pb-24 sm:p-8 sm:pb-8">
           {activeMenu === "Profil Saya" && (
             <div className="mx-auto max-w-5xl space-y-6">
               <div className="overflow-hidden rounded-3xl bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-900 p-6 text-white shadow-xl sm:p-8">
