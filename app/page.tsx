@@ -602,22 +602,49 @@ export default function Home() {
     ruang: "",
   });
   const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [attendancePanel, setAttendancePanel] = useState<"menu" | "siswa" | "pengganti" | "guru">("menu");
+  const [attendanceClassChosen, setAttendanceClassChosen] = useState(false);
   const [attendanceClass, setAttendanceClass] = useState("1");
   const [studentAttendance, setStudentAttendance] = useState<Record<string, AttendanceStatus>>({});
-  const [teacherAttendanceConfirmed, setTeacherAttendanceConfirmed] = useState(false);
+  type TeacherAttendanceToday = {
+    id: string;
+    tanggal: string;
+    jam_masuk: string | null;
+    selfie_masuk: string | null;
+    jam_pulang: string | null;
+    selfie_pulang: string | null;
+  };
+  const [teacherAttendanceToday, setTeacherAttendanceToday] = useState<TeacherAttendanceToday | null>(null);
+  const [teacherAttendanceMode, setTeacherAttendanceMode] = useState<"masuk" | "pulang">("masuk");
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [attendanceSaving, setAttendanceSaving] = useState(false);
   const [attendanceSaved, setAttendanceSaved] = useState(false);
-  const [attendanceDate, setAttendanceDate] = useState("2026-01-02");
-  const [attendanceMonth, setAttendanceMonth] = useState(0);
-  const [attendanceYear] = useState(2026);
+  const today = new Date();
+  const todayDateString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const [attendanceDate, setAttendanceDate] = useState(todayDateString);
+  const [attendanceMonth, setAttendanceMonth] = useState(today.getMonth());
+  const [attendanceYear] = useState(today.getFullYear());
   const [attendanceRecords, setAttendanceRecords] = useState<Record<string, AttendanceStatus>>({});
   const [attendanceStudents, setAttendanceStudents] = useState<AttendanceStudent[]>([]);
   const [attendanceSubjects, setAttendanceSubjects] = useState<{ id: string; name: string; code: string }[]>([]);
   const [teacherAssignments, setTeacherAssignments] = useState<{ subjectId: string; subjectName: string; subjectCode: string; classId: string; className: string; isWaliKelas: boolean }[]>([]);
   const [attendanceSubjectId, setAttendanceSubjectId] = useState<string>("");
+  type DutyTeacher = { id: string; nama: string; email: string };
+  type SubstituteAssignment = { id: string; tanggal: string; classId: string; className: string; subjectId: string; subjectName: string; subjectCode: string; guruAsliId: string; guruAsliName: string; guruPenggantiId: string; guruPenggantiName: string; keterangan: string };
+  const [dutyTeachers, setDutyTeachers] = useState<DutyTeacher[]>([]);
+  const [allGuruProfiles, setAllGuruProfiles] = useState<DutyTeacher[]>([]);
+  const [substituteAssignments, setSubstituteAssignments] = useState<SubstituteAssignment[]>([]);
+  const [substituteLoading, setSubstituteLoading] = useState(false);
+  const [substituteSaving, setSubstituteSaving] = useState(false);
+  const [dutySaving, setDutySaving] = useState(false);
+  const [dutyTeacherId, setDutyTeacherId] = useState("");
+  const [substituteClassId, setSubstituteClassId] = useState("");
+  const [substituteSubjectId, setSubstituteSubjectId] = useState("");
+  const [substituteTeacherId, setSubstituteTeacherId] = useState("");
+  const [substituteNote, setSubstituteNote] = useState("");
+  const [dutyNote, setDutyNote] = useState("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isWaliKelas, setIsWaliKelas] = useState(false);
   const canEditGrades = role === "Admin" || role === "Guru";
@@ -890,9 +917,77 @@ export default function Home() {
     ])
   ).filter(Boolean);
 
-  // Dropdown kelas di portal Guru/Operator mengikuti data Admin.
-  // Kelas awal tetap fokus ke kelas wali, tetapi semua kelas tetap bisa dipilih.
-  const attendanceClassOptions = syncedClassNames;
+  // Kelas absensi Guru mengikuti penugasan mengajar + kelas yang diwalikan.
+  // Admin tetap dapat memilih semua kelas.
+  const waliAttendanceClassIds = new Set(
+    teacherAssignments.filter((item) => item.isWaliKelas).map((item) => item.classId)
+  );
+  const waliAttendanceClassNames = teacherAssignments
+    .filter((item) => item.isWaliKelas && item.className)
+    .map((item) => item.className);
+
+  // Mapel Wali Kelas:
+  // Kelas 1-2 : Bahasa Indonesia, PP, Matematika, Bahasa Sunda, Fikih, Seni
+  // Kelas 3-6 : keenam mapel di atas + IPAS
+  //
+  // Database sekolah kadang menyimpan nama "PP" sebagai "Pendidikan Pancasila"
+  // dan "Seni" sebagai "Seni Budaya". Karena itu pencocokan dilakukan dengan
+  // alias, tetapi nama asli dari tabel subjects tetap yang ditampilkan.
+  const waliKelasBaseSubjectNames = new Set([
+    "Bahasa Indonesia",
+    "PP",
+    "Matematika",
+    "Bahasa Sunda",
+    "Fikih",
+    "Seni",
+  ]);
+
+  const normalizeSubjectName = (value: string) =>
+    value.toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
+
+  const isWaliKelasSubject = (subjectName: string, className: string) => {
+    const normalized = normalizeSubjectName(subjectName);
+    const baseAliases = new Set([
+      "bahasaindonesia",
+      "pp",
+      "pendidikanpancasila",
+      "matematika",
+      "bahasasunda",
+      "fikih",
+      "fiqih",
+      "seni",
+      "senibudaya",
+    ]);
+    const match = className.match(/(?:kelas\s*)?(\d+)/i);
+    const level = match ? Number(match[1]) : 0;
+    if (baseAliases.has(normalized)) return true;
+    return level >= 3 && level <= 6 && normalized === "ipas";
+  };
+
+  const waliKelasSubjectNamesForClass = (className: string) => {
+    const match = className.match(/(?:kelas\s*)?(\d+)/i);
+    const level = match ? Number(match[1]) : 0;
+    if (level >= 3 && level <= 6) {
+      return new Set([...waliKelasBaseSubjectNames, "IPAS"]);
+    }
+    return waliKelasBaseSubjectNames;
+  };
+
+  // Daftar ini dipakai bersama oleh Nilai & Raport serta Absensi untuk semua Wali Kelas.
+
+  const attendanceClassOptions =
+    role === "Admin"
+      ? syncedClassNames
+      : Array.from(
+          new Set([
+            ...teacherAssignments.filter((item) => item.className).map((item) => item.className),
+            ...waliAttendanceClassNames,
+            ...substituteAssignments
+              .filter((item) => item.guruPenggantiId === currentUserId)
+              .map((item) => item.className),
+          ])
+        );
+
   const scheduleClassOptions = syncedClassNames;
 
   const loadAttendanceData = async () => {
@@ -1108,40 +1203,56 @@ export default function Home() {
     }
 
     if (userRole === "Guru") {
-      // Guru biasa hanya melihat kelas yang memang ada di teaching_assignments.
-      // Jika guru juga wali kelas, dropdown kelas dibuat lengkap agar guru
-      // bisa memilih kelas lain saat diperlukan. Hak SIMPAN nilai tetap
-      // diperiksa lagi di saveGrades(), jadi dropdown lengkap tidak berarti
-      // guru otomatis boleh menginput semua kelas/mapel.
-      const ownAssignments = assignmentSource.filter((item) => item.classId);
-      const isWali = ownAssignments.some((assignment) => assignment.isWaliKelas);
+      // Wali kelas tetap tidak otomatis menjadi guru semua mata pelajaran.
+      // Input nilai hanya menampilkan kelas + mapel yang benar-benar ada
+      // di teaching_assignments. Hak raport wali kelas tetap dipisahkan
+      // melalui tab Raport.
+      const ownAssignments = assignmentSource.filter(
+        (item) => item.classId && item.subjectId
+      );
+      const allowedClassIds = Array.from(
+        new Set(ownAssignments.map((assignment) => assignment.classId))
+      );
+      const allowedSubjectIds = Array.from(
+        new Set(ownAssignments.map((assignment) => assignment.subjectId))
+      );
+
       const waliClassIds = new Set(
-        ownAssignments
+        assignmentSource
           .filter((assignment) => assignment.isWaliKelas)
           .map((assignment) => assignment.classId)
       );
 
-      if (isWali) {
-        // Wali kelas boleh memilih seluruh kelas dari dropdown.
-        nextClasses = normalizedClasses;
-        // Wali kelas juga perlu melihat seluruh mapel di dropdown karena
-        // wali kelas dapat mengajar lebih dari satu mapel dan tetap perlu
-        // mengelola raport kelas yang diwalikan.
-        nextSubjects = allSubjects;
-      } else {
-        const allowedClassIds = Array.from(new Set(ownAssignments.map((assignment) => assignment.classId)));
-        nextClasses = normalizedClasses.filter((item) => allowedClassIds.includes(item.id));
-        nextSubjects = allSubjects.filter((item) =>
-          ownAssignments.some((assignment) => assignment.subjectId === item.id)
-        );
-      }
+      // Kelas wali tetap muncul di halaman Nilai & Report, walaupun guru
+      // tersebut belum mempunyai teaching_assignment untuk mata pelajaran.
+      // Hak input nilai tetap dibatasi oleh teaching_assignments.
+      nextClasses = normalizedClasses.filter(
+        (item) => allowedClassIds.includes(item.id) || waliClassIds.has(item.id)
+      );
+      // Susun mapel berdasarkan SEMUA kelas yang boleh dipilih guru.
+      // Ini penting karena pilihan kelas bisa lebih dari satu (contoh Indra:
+      // Kelas 3 sebagai wali + Kelas 1 dan 2 sebagai guru PJOK).
+      // Jangan memakai selectedGradeClassId di sini karena saat login nilainya
+      // masih bisa kosong/stale.
+      nextSubjects = allSubjects.filter((subject) =>
+        nextClasses.some((classItem) => {
+          const isWaliClass = waliClassIds.has(classItem.id);
+          const isOwnTeaching = ownAssignments.some(
+            (assignment) =>
+              assignment.classId === classItem.id &&
+              assignment.subjectId === subject.id
+          );
 
-      // Saat login, fokus awal wali kelas adalah kelas yang dia walikan
-      // (contoh: Kelas 1), bukan otomatis kelas pertama dari database.
+          return isWaliClass
+            ? isWaliKelasSubject(subject.name, classItem.nama) || isOwnTeaching
+            : isOwnTeaching;
+        })
+      );
+
       const waliClass = normalizedClasses.find((item) =>
         waliClassIds.has(item.id) || (userId && item.waliGuruId === userId)
       );
-      if (waliClass) {
+      if (waliClass && nextClasses.some((item) => item.id === waliClass.id)) {
         setSelectedGradeClassId(waliClass.id);
         setSelectedReportClass(waliClass.nama);
       }
@@ -1416,6 +1527,24 @@ export default function Home() {
     // Wali kelas tidak otomatis menjadi guru semua mata pelajaran.
     // Hanya teaching_assignments yang boleh dipakai untuk menyimpan nilai.
     if (role === "Guru") {
+      const selectedSubjectRow = gradeSubjects.find((subject) => subject.id === selectedGradeSubjectId);
+      const selectedClassName = gradeClasses.find((item) => item.id === selectedGradeClassId)?.nama ?? "";
+      const waliKelasAllowed =
+        isWaliKelas &&
+        teacherAssignments.some((assignment) => assignment.isWaliKelas && assignment.classId === selectedGradeClassId) &&
+        Boolean(
+          selectedSubjectRow &&
+          isWaliKelasSubject(
+            selectedSubjectRow.name,
+            gradeClasses.find((item) => item.id === selectedGradeClassId)?.nama ?? ""
+          )
+        );
+      const ownTeachingOnSelectedClass = teacherAssignments.some(
+        (assignment) =>
+          assignment.classId === selectedGradeClassId &&
+          assignment.subjectId === selectedGradeSubjectId &&
+          Boolean(assignment.subjectId)
+      );
       const allowed = teacherAssignments.some(
         (assignment) =>
           assignment.classId === selectedGradeClassId &&
@@ -1423,8 +1552,8 @@ export default function Home() {
           !assignment.isWaliKelas
       );
 
-      if (!allowed) {
-        alert("Anda hanya dapat menginput nilai untuk mata pelajaran yang memang diampu. Status wali kelas tidak otomatis memberi hak input semua mata pelajaran.");
+      if (!allowed && !waliKelasAllowed && !ownTeachingOnSelectedClass) {
+        alert("Anda hanya dapat menginput nilai sesuai kelas wali atau penugasan mata pelajaran yang Anda ampu.");
         return;
       }
     }
@@ -2375,6 +2504,69 @@ export default function Home() {
           }
         }
 
+        // Penugasan khusus guru yang juga merangkap wali kelas.
+        // Ini menjadi fallback agar pilihan kelas/mapel tetap muncul walaupun
+        // teaching_assignments belum lengkap di database. Jika assignment sudah
+        // ada, tidak dibuat duplikat.
+        const guruName = (profile.nama ?? "").toLowerCase();
+        const waliClassNamesForSpecialRole = (waliAssignments ?? []).map((wali: any) => {
+          const waliClass = Array.isArray(wali.classes) ? wali.classes[0] : wali.classes;
+          return String(waliClass?.nama ?? "").toLowerCase();
+        });
+        const isIndra =
+          guruName.includes("indra") ||
+          waliClassNamesForSpecialRole.some((className) => /(?:kelas\s*)?3\b/i.test(className));
+        const isDandi =
+          guruName.includes("dandi") ||
+          waliClassNamesForSpecialRole.some((className) => /4\s*ali/i.test(className));
+
+        if (isIndra || isDandi) {
+          const [{ data: specialClasses }, { data: specialSubjects }] = await Promise.all([
+            supabase.from("classes").select("id, nama, tingkat").order("tingkat", { ascending: true }),
+            supabase.from("subjects").select("id, nama, kode").order("nama", { ascending: true }),
+          ]);
+
+          const pjokSubject = (specialSubjects ?? []).find((subject: any) => {
+            const subjectName = String(subject.nama ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+            return subjectName === "pjok" || subjectName === "olahraga" || subjectName.includes("pendidikanjasmani");
+          });
+
+          if (pjokSubject) {
+            const targetClasses = (specialClasses ?? []).filter((classRow: any) => {
+              const level = Number(classRow.tingkat ?? String(classRow.nama ?? "").match(/(?:kelas\s*)?(\d+)/i)?.[1] ?? 0);
+              const className = String(classRow.nama ?? "").toLowerCase();
+
+              // Indra: wali Kelas 3 + guru PJOK Kelas 1 dan 2.
+              if (isIndra) return level === 1 || level === 2;
+
+              // Dandi/Ali: wali Kelas 4 Ali + guru PJOK Kelas 4 Umar, 5, dan 6.
+              // Kelas 4 Ali juga diberi PJOK agar peran guru mapelnya konsisten.
+              if (isDandi) {
+                return level === 5 || level === 6 || (level === 4 && /ali|umar/.test(className));
+              }
+              return false;
+            });
+
+            for (const classRow of targetClasses) {
+              const exists = loginAssignments.some(
+                (assignment) =>
+                  assignment.classId === classRow.id &&
+                  assignment.subjectId === pjokSubject.id
+              );
+              if (!exists) {
+                loginAssignments.push({
+                  subjectId: pjokSubject.id,
+                  subjectName: pjokSubject.nama ?? "PJOK",
+                  subjectCode: pjokSubject.kode ?? "PJOK",
+                  classId: classRow.id,
+                  className: classRow.nama ?? "",
+                  isWaliKelas: false,
+                });
+              }
+            }
+          }
+        }
+
         const waliKelasAktif = loginAssignments.some(
           (assignment) => assignment.isWaliKelas
         );
@@ -2435,6 +2627,9 @@ export default function Home() {
     setAttendanceStudents([]);
     setAttendanceSubjects([]);
     setTeacherAssignments([]);
+    setTeacherAttendanceToday(null);
+    setTeacherAttendanceMode("masuk");
+    setSelfiePreview(null);
     setAttendanceSubjectId("");
     setAttendanceRecords({});
     setStudentAttendance({});
@@ -2480,6 +2675,31 @@ export default function Home() {
     setCameraOpen(false);
   };
 
+  const loadTeacherAttendanceToday = async () => {
+    if (!currentUserId || !attendanceDate || role !== "Guru") return;
+
+    const { data, error } = await supabase
+      .from("teacher_attendance")
+      .select("id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang")
+      .eq("guru_id", currentUserId)
+      .eq("tanggal", attendanceDate)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Gagal memuat absensi guru:", error);
+      return;
+    }
+
+    setTeacherAttendanceToday(data);
+    setTeacherAttendanceMode(data?.jam_masuk && !data?.jam_pulang ? "pulang" : "masuk");
+  };
+
+  useEffect(() => {
+    if (loggedIn && role === "Guru" && currentUserId && attendanceDate) {
+      void loadTeacherAttendanceToday();
+    }
+  }, [loggedIn, role, currentUserId, attendanceDate]);
+
   const captureTeacherSelfie = () => {
     const video = document.getElementById("teacher-selfie-video") as HTMLVideoElement | null;
 
@@ -2500,24 +2720,183 @@ export default function Home() {
 
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
     setSelfiePreview(canvas.toDataURL("image/jpeg", 0.85));
-    setTeacherAttendanceConfirmed(false);
     closeTeacherCamera();
   };
 
   const confirmTeacherAttendance = async () => {
+    if (!currentUserId) {
+      alert("Sesi login tidak ditemukan. Silakan login kembali.");
+      return;
+    }
+
     if (!selfiePreview) {
-      alert("Ambil selfie terlebih dahulu untuk konfirmasi hadir.");
+      alert("Ambil selfie terlebih dahulu.");
+      return;
+    }
+
+    if (teacherAttendanceMode === "pulang" && !teacherAttendanceToday?.jam_masuk) {
+      alert("Anda harus melakukan absen masuk terlebih dahulu.");
+      return;
+    }
+
+    if (teacherAttendanceMode === "pulang" && teacherAttendanceToday?.jam_pulang) {
+      alert("Absen pulang hari ini sudah tersimpan.");
+      return;
+    }
+
+    if (teacherAttendanceMode === "masuk" && teacherAttendanceToday?.jam_masuk) {
+      alert("Absen masuk hari ini sudah tersimpan.");
       return;
     }
 
     setAttendanceSaving(true);
 
-    // Sementara disimpan di state UI. Nanti selfie dan data kehadiran
-    // kita sambungkan ke Supabase Storage + tabel attendance.
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    try {
+      const now = new Date();
+      const timestamp = now.toISOString();
+      const isMasuk = teacherAttendanceMode === "masuk";
+      const filePath = `${currentUserId}/${attendanceDate}/${isMasuk ? "masuk" : "pulang"}.jpg`;
 
-    setTeacherAttendanceConfirmed(true);
-    setAttendanceSaving(false);
+      const response = await fetch(selfiePreview);
+      const blob = await response.blob();
+
+      const { error: uploadError } = await supabase.storage
+        .from("teacher-attendance")
+        .upload(filePath, blob, {
+          contentType: "image/jpeg",
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.error("Gagal upload selfie guru:", uploadError);
+        alert(`Foto gagal disimpan: ${uploadError.message}`);
+        return;
+      }
+
+      if (isMasuk) {
+        const { data, error } = await supabase
+          .from("teacher_attendance")
+          .upsert(
+            {
+              guru_id: currentUserId,
+              tanggal: attendanceDate,
+              jam_masuk: timestamp,
+              selfie_masuk: filePath,
+            },
+            { onConflict: "guru_id,tanggal" }
+          )
+          .select("id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang")
+          .single();
+
+        if (error) {
+          console.error("Gagal menyimpan absen masuk:", error);
+          alert(`Absen masuk gagal disimpan: ${error.message}`);
+          return;
+        }
+
+        setTeacherAttendanceToday(data);
+        setTeacherAttendanceMode("pulang");
+        setSelfiePreview(null);
+        alert("✅ Absen masuk berhasil disimpan.");
+      } else {
+        const { data, error } = await supabase
+          .from("teacher_attendance")
+          .update({
+            jam_pulang: timestamp,
+            selfie_pulang: filePath,
+            updated_at: timestamp,
+          })
+          .eq("id", teacherAttendanceToday?.id ?? "")
+          .is("jam_pulang", null)
+          .select("id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang")
+          .single();
+
+        if (error) {
+          console.error("Gagal menyimpan absen pulang:", error);
+          alert(`Absen pulang gagal disimpan: ${error.message}`);
+          return;
+        }
+
+        setTeacherAttendanceToday(data);
+        setSelfiePreview(null);
+        alert("✅ Absen pulang berhasil disimpan.");
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Terjadi kesalahan saat menyimpan absensi guru.");
+    } finally {
+      setAttendanceSaving(false);
+    }
+  };
+
+  const loadDutyAndSubstituteData = async (dateValue = attendanceDate) => {
+    if (!dateValue) return;
+    setSubstituteLoading(true);
+    try {
+      const { data: dutyRows, error: dutyError } = await supabase.from("duty_assignments").select("id, guru_id, tanggal, keterangan").eq("tanggal", dateValue).order("created_at", { ascending: true });
+      if (dutyError) console.error("Gagal memuat guru piket:", dutyError);
+      const dutyIds = [...new Set((dutyRows ?? []).map((r: any) => r.guru_id))];
+      const { data: dutyProfiles } = await supabase.from("profiles").select("id, nama, email").in("id", dutyIds.length ? dutyIds : ["00000000-0000-0000-0000-000000000000"]);
+      const profileMap = new Map((dutyProfiles ?? []).map((p: any) => [p.id, { id: p.id, nama: p.nama, email: p.email ?? "" }]));
+      setDutyTeachers((dutyRows ?? []).map((r: any) => profileMap.get(r.guru_id)).filter(Boolean) as DutyTeacher[]);
+      const { data: guruProfiles } = await supabase.from("profiles").select("id, nama, email").eq("role", "guru").order("nama");
+      setAllGuruProfiles((guruProfiles ?? []).map((p: any) => ({ id: p.id, nama: p.nama, email: p.email ?? "" })));
+      const { data: rows, error } = await supabase.from("substitute_assignments").select("id, tanggal, class_id, subject_id, guru_asli_id, guru_pengganti_id, keterangan").eq("tanggal", dateValue).order("created_at", { ascending: true });
+      if (error) { console.error("Gagal memuat guru pengganti:", error); setSubstituteAssignments([]); return; }
+      const classIds = [...new Set((rows ?? []).map((r: any) => r.class_id))];
+      const subjectIds = [...new Set((rows ?? []).map((r: any) => r.subject_id))];
+      const teacherIds = [...new Set((rows ?? []).flatMap((r: any) => [r.guru_asli_id, r.guru_pengganti_id]))];
+      const [{ data: classes }, { data: subjects }, { data: teachers }] = await Promise.all([
+        supabase.from("classes").select("id, nama").in("id", classIds.length ? classIds : ["00000000-0000-0000-0000-000000000000"]),
+        supabase.from("subjects").select("id, nama, kode").in("id", subjectIds.length ? subjectIds : ["00000000-0000-0000-0000-000000000000"]),
+        supabase.from("profiles").select("id, nama").in("id", teacherIds.length ? teacherIds : ["00000000-0000-0000-0000-000000000000"]),
+      ]);
+      const classMap = new Map((classes ?? []).map((x: any) => [x.id, x.nama]));
+      const subjectMap = new Map((subjects ?? []).map((x: any) => [x.id, { name: x.nama, code: x.kode }]));
+      const teacherMap = new Map((teachers ?? []).map((x: any) => [x.id, x.nama]));
+      setSubstituteAssignments((rows ?? []).map((r: any) => { const sub = subjectMap.get(r.subject_id); return { id: r.id, tanggal: r.tanggal, classId: r.class_id, className: classMap.get(r.class_id) ?? "-", subjectId: r.subject_id, subjectName: sub?.name ?? "-", subjectCode: sub?.code ?? "-", guruAsliId: r.guru_asli_id, guruAsliName: teacherMap.get(r.guru_asli_id) ?? "-", guruPenggantiId: r.guru_pengganti_id, guruPenggantiName: teacherMap.get(r.guru_pengganti_id) ?? "-", keterangan: r.keterangan ?? "" }; }));
+    } finally { setSubstituteLoading(false); }
+  };
+
+  const saveDutyAssignment = async () => {
+    if (role !== "Admin") return alert("Hanya admin yang dapat mengatur guru piket.");
+    if (!attendanceDate || !dutyTeacherId) return alert("Pilih tanggal dan guru piket.");
+    if (dutyTeachers.some((t) => t.id === dutyTeacherId)) return alert("Guru tersebut sudah menjadi guru piket pada tanggal ini.");
+    setDutySaving(true);
+    const { error } = await supabase.from("duty_assignments").insert({ guru_id: dutyTeacherId, tanggal: attendanceDate, keterangan: dutyNote.trim() || null });
+    setDutySaving(false);
+    if (error) return alert(`Guru piket gagal disimpan: ${error.message}`);
+    setDutyTeacherId(""); setDutyNote(""); await loadDutyAndSubstituteData(attendanceDate); alert("Guru piket berhasil ditambahkan.");
+  };
+
+  const removeDutyAssignment = async (guruId: string) => {
+    if (role !== "Admin") return;
+    const { error } = await supabase.from("duty_assignments").delete().eq("guru_id", guruId).eq("tanggal", attendanceDate);
+    if (error) return alert(`Guru piket gagal dihapus: ${error.message}`);
+    await loadDutyAndSubstituteData(attendanceDate);
+  };
+
+  const saveSubstituteAssignment = async () => {
+    if (!currentUserId) return alert("Sesi login tidak ditemukan. Silakan login kembali.");
+    if (!attendanceDate || !substituteClassId || !substituteSubjectId || !substituteTeacherId) return alert("Lengkapi kelas, mata pelajaran, dan guru pengganti.");
+    const isOwnTeachingAssignment = teacherAssignments.some(
+      (a) => a.classId === substituteClassId && a.subjectId === substituteSubjectId
+    );
+    const isOwnWaliClass = teacherAssignments.some(
+      (a) => a.isWaliKelas && a.classId === substituteClassId
+    );
+
+    if (role === "Guru" && !isOwnTeachingAssignment && !isOwnWaliClass) {
+      return alert("Anda hanya dapat membuat pengganti untuk kelas dan mata pelajaran yang Anda ampu atau kelas yang Anda walikan.");
+    }
+    if (!dutyTeachers.some((t) => t.id === substituteTeacherId)) return alert("Guru pengganti harus merupakan guru piket pada tanggal tersebut.");
+    if (substituteTeacherId === currentUserId) return alert("Guru pengganti harus berbeda dari guru asli.");
+    if (substituteAssignments.some((a) => a.classId === substituteClassId && a.subjectId === substituteSubjectId)) return alert("Pengganti untuk kelas dan mata pelajaran tersebut sudah ditentukan.");
+    setSubstituteSaving(true);
+    const { error } = await supabase.from("substitute_assignments").insert({ tanggal: attendanceDate, class_id: substituteClassId, subject_id: substituteSubjectId, guru_asli_id: currentUserId, guru_pengganti_id: substituteTeacherId, keterangan: substituteNote.trim() || null });
+    setSubstituteSaving(false);
+    if (error) return alert(`Guru pengganti gagal disimpan: ${error.message}`);
+    setSubstituteClassId(""); setSubstituteSubjectId(""); setSubstituteTeacherId(""); setSubstituteNote(""); await loadDutyAndSubstituteData(attendanceDate); alert("Guru pengganti berhasil ditentukan.");
   };
 
   const saveStudentAttendance = async () => {
@@ -2541,14 +2920,26 @@ export default function Home() {
     }
 
     if (role === "Guru") {
-      const allowed = teacherAssignments.some(
+      const ownAssignment = teacherAssignments.some(
         (assignment) =>
           assignment.className === attendanceClass &&
           assignment.subjectId === attendanceSubjectId
       );
+      const waliClassAccess = teacherAssignments.some(
+        (assignment) =>
+          assignment.isWaliKelas &&
+          assignment.className === attendanceClass
+      );
+      const substituteAssignment = substituteAssignments.some(
+        (assignment) =>
+          assignment.tanggal === attendanceDate &&
+          assignment.className === attendanceClass &&
+          assignment.subjectId === attendanceSubjectId &&
+          assignment.guruPenggantiId === currentUserId
+      );
 
-      if (!allowed) {
-        alert("Guru hanya dapat mengisi absensi untuk kelas dan mata pelajaran yang diampu.");
+      if (!ownAssignment && !waliClassAccess && !substituteAssignment) {
+        alert("Anda tidak memiliki hak untuk mengisi absensi kelas dan mata pelajaran ini.");
         return;
       }
     }
@@ -3252,6 +3643,11 @@ export default function Home() {
 
       if (menuName === "Pengaturan Sekolah") {
         await loadSchoolSettings();
+      }
+
+      if (menuName === "Absensi") {
+        await loadDutyAndSubstituteData(attendanceDate);
+        await loadTeacherAttendanceToday();
       }
 
       // Beri sedikit waktu agar transisi motion tetap terasa halus
@@ -4807,16 +5203,19 @@ export default function Home() {
                     >
                       <option value="">Pilih mata pelajaran</option>
                       {gradeSubjects
-                        .filter((subject) =>
-                          role !== "Guru" ||
-                          isWaliKelas ||
-                          teacherAssignments.some(
+                        .filter((subject) => {
+                          if (role !== "Guru") return true;
+                          const selectedClassName = gradeClasses.find((item) => item.id === selectedGradeClassId)?.nama ?? "";
+                          const waliKelasAllowed =
+                            isWaliKelas &&
+                            teacherAssignments.some((item) => item.isWaliKelas && item.classId === selectedGradeClassId) &&
+                            isWaliKelasSubject(subject.name, selectedClassName);
+                          return waliKelasAllowed || teacherAssignments.some(
                             (item) =>
                               item.subjectId === subject.id &&
-                              item.classId === selectedGradeClassId &&
-                              !item.isWaliKelas
-                          )
-                        )
+                              item.classId === selectedGradeClassId
+                          );
+                        })
                         .map((subject) => (
                           <option key={subject.id} value={subject.id}>{subject.code} - {subject.name}</option>
                         ))}
@@ -4828,7 +5227,7 @@ export default function Home() {
                       <p className="mt-2 text-xs text-gray-500">Guru hanya dapat menginput nilai pada kelas dan mata pelajaran yang diampu.</p>
                     )}
                     {role === "Guru" && isWaliKelas && (
-                      <p className="mt-2 text-xs text-emerald-700">Wali kelas dapat memilih semua kelas dan semua mata pelajaran. Hak simpan nilai tetap mengikuti mata pelajaran/kelas yang benar-benar diampu.</p>
+                      <p className="mt-2 text-xs text-emerald-700">Sebagai wali kelas, Anda dapat mengelola raport kelas yang diwalikan. Input nilai tetap hanya untuk mata pelajaran dan kelas yang benar-benar diampu.</p>
                     )}
                   </div>
 
@@ -5444,83 +5843,240 @@ export default function Home() {
                 </div>
               </div>
               {(role === "Admin" || role === "Guru") && (
-                <>
+                <div className="mb-6 grid gap-4 md:grid-cols-3">
+                  <button type="button" onClick={() => { setAttendancePanel("siswa"); setAttendanceClassChosen(false); setAttendanceDate(""); }} className={`rounded-2xl border p-5 text-left transition ${attendancePanel === "siswa" ? "border-blue-600 bg-blue-50 shadow-sm" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50"}`}>
+                    <div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-xl text-white">👨‍🎓</div><div><p className="font-bold text-gray-900">Absen Siswa</p><p className="text-xs text-gray-500">Pilih kelas → tanggal → isi absensi</p></div></div>
+                  </button>
+                  <button type="button" onClick={() => { setAttendancePanel("pengganti"); setAttendanceDate(todayDateString); }} className={`rounded-2xl border p-5 text-left transition ${attendancePanel === "pengganti" ? "border-amber-500 bg-amber-50 shadow-sm" : "border-slate-200 bg-white hover:border-amber-300 hover:bg-amber-50"}`}>
+                    <div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-500 text-xl text-white">🔄</div><div><p className="font-bold text-gray-900">Guru Pengganti</p><p className="text-xs text-gray-500">Atur guru yang menggantikan</p></div></div>
+                  </button>
                   {role === "Guru" && (
-                    <div className="mb-6 rounded-2xl border border-emerald-100 bg-emerald-50 p-5">
-                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <p className="text-sm font-semibold text-emerald-700">Absensi Guru</p>
-                          <h3 className="mt-1 text-lg font-bold text-gray-900">
-                            Konfirmasi hadir di sekolah
-                          </h3>
-                          <p className="mt-1 text-sm text-gray-600">
-                            Ambil selfie dari kamera perangkat untuk mengonfirmasi kehadiran.
-                          </p>
+                    <button type="button" onClick={() => { setAttendancePanel("guru"); setAttendanceDate(todayDateString); }} className={`rounded-2xl border p-5 text-left transition ${attendancePanel === "guru" ? "border-emerald-600 bg-emerald-50 shadow-sm" : "border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50"}`}>
+                      <div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-600 text-xl text-white">📸</div><div><p className="font-bold text-gray-900">Absensi Kehadiran Guru</p><p className="text-xs text-gray-500">Absen masuk/pulang dengan selfie</p></div></div>
+                    </button>
+                  )}
+                </div>
+              )}
+              {(role === "Admin" || role === "Guru") && (
+                <>
+                  {role === "Guru" && attendancePanel === "guru" && (
+                    <div className="mb-6 overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm">
+                      <div className="border-b border-emerald-100 bg-emerald-50 px-5 py-4">
+                        <p className="text-sm font-semibold text-emerald-700">Absensi Guru</p>
+                        <h3 className="mt-1 text-lg font-bold text-gray-900">Kehadiran di Sekolah</h3>
+                        <p className="mt-1 text-sm text-gray-600">Absen masuk dan pulang menggunakan selfie kamera. Satu guru hanya dapat memiliki satu record per tanggal.</p>
+                      </div>
+
+                      <div className="grid gap-4 p-5 md:grid-cols-2">
+                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-5">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-600 text-xl">🌅</div>
+                            <div>
+                              <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">Absen Masuk</p>
+                              <p className="font-bold text-gray-900">{teacherAttendanceToday?.jam_masuk ? "Sudah absen" : "Belum absen"}</p>
+                            </div>
+                          </div>
+
+                          {teacherAttendanceToday?.jam_masuk ? (
+                            <div className="mt-4 rounded-xl bg-white p-4">
+                              <p className="text-xs text-gray-500">Jam masuk</p>
+                              <p className="mt-1 text-2xl font-black text-emerald-700">
+                                {new Date(teacherAttendanceToday.jam_masuk).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB
+                              </p>
+                              <span className="mt-2 inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">✓ Tersimpan</span>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => { setTeacherAttendanceMode("masuk"); setSelfiePreview(null); void openTeacherCamera(); }}
+                              disabled={attendanceSaving}
+                              className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+                            >
+                              📸 Absen Masuk
+                            </button>
+                          )}
                         </div>
-                        {teacherAttendanceConfirmed ? (
-                          <span className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white">
-                            ✓ Hadir terkonfirmasi
-                          </span>
-                        ) : (
-                          <button
-                            onClick={openTeacherCamera}
-                            className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700"
-                          >
-                            📸 Ambil Selfie
-                          </button>
-                        )}
+
+                        <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-5">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-xl">🌇</div>
+                            <div>
+                              <p className="text-xs font-bold uppercase tracking-wide text-blue-700">Absen Pulang</p>
+                              <p className="font-bold text-gray-900">{teacherAttendanceToday?.jam_pulang ? "Sudah absen" : teacherAttendanceToday?.jam_masuk ? "Siap absen pulang" : "Belum tersedia"}</p>
+                            </div>
+                          </div>
+
+                          {teacherAttendanceToday?.jam_pulang ? (
+                            <div className="mt-4 rounded-xl bg-white p-4">
+                              <p className="text-xs text-gray-500">Jam pulang</p>
+                              <p className="mt-1 text-2xl font-black text-blue-700">
+                                {new Date(teacherAttendanceToday.jam_pulang).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB
+                              </p>
+                              <span className="mt-2 inline-flex rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">✓ Tersimpan</span>
+                            </div>
+                          ) : teacherAttendanceToday?.jam_masuk ? (
+                            <button
+                              type="button"
+                              onClick={() => { setTeacherAttendanceMode("pulang"); setSelfiePreview(null); void openTeacherCamera(); }}
+                              disabled={attendanceSaving}
+                              className="mt-4 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+                            >
+                              📸 Absen Pulang
+                            </button>
+                          ) : (
+                            <div className="mt-4 rounded-xl bg-gray-100 p-4 text-center">
+                              <p className="text-sm font-semibold text-gray-500">Absen masuk terlebih dahulu</p>
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       {selfiePreview && (
-                        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
-                          <img
-                            src={selfiePreview}
-                            alt="Preview selfie guru"
-                            className="h-32 w-32 rounded-2xl border border-emerald-200 object-cover"
-                          />
-                          {!teacherAttendanceConfirmed && (
-                            <button
-                              onClick={confirmTeacherAttendance}
-                              disabled={attendanceSaving}
-                              className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
-                            >
-                              {attendanceSaving ? "Menyimpan..." : "Konfirmasi Hadir"}
-                            </button>
-                          )}
+                        <div className="mx-5 mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                            <img src={selfiePreview} alt="Preview selfie guru" className="h-32 w-32 rounded-2xl border border-slate-200 object-cover" />
+                            <div className="flex-1">
+                              <p className="font-bold text-gray-900">{teacherAttendanceMode === "masuk" ? "Selfie Absen Masuk" : "Selfie Absen Pulang"}</p>
+                              <p className="mt-1 text-sm text-gray-500">Pastikan foto jelas sebelum disimpan.</p>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <button type="button" onClick={confirmTeacherAttendance} disabled={attendanceSaving} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50">
+                                  {attendanceSaving ? "Menyimpan..." : teacherAttendanceMode === "masuk" ? "Konfirmasi Absen Masuk" : "Konfirmasi Absen Pulang"}
+                                </button>
+                                <button type="button" onClick={() => setSelfiePreview(null)} disabled={attendanceSaving} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-gray-700">Ambil Ulang</button>
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       )}
 
                       {cameraOpen && (
-                        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-950 p-4">
-                          <video
-                            id="teacher-selfie-video"
-                            autoPlay
-                            playsInline
-                            muted
-                            ref={(element) => {
-                              if (element && cameraStream) element.srcObject = cameraStream;
-                            }}
-                            className="mx-auto max-h-[360px] w-full max-w-xl rounded-xl object-cover"
-                          />
+                        <div className="mx-5 mb-5 rounded-2xl border border-slate-200 bg-slate-950 p-4">
+                          <p className="mb-3 text-center text-sm font-bold text-white">{teacherAttendanceMode === "masuk" ? "Selfie Absen Masuk" : "Selfie Absen Pulang"}</p>
+                          <video id="teacher-selfie-video" autoPlay playsInline muted ref={(element) => { if (element && cameraStream) element.srcObject = cameraStream; }} className="mx-auto max-h-[360px] w-full max-w-xl rounded-xl object-cover" />
                           <div className="mt-3 flex flex-wrap justify-center gap-2">
-                            <button
-                              onClick={captureTeacherSelfie}
-                              className="rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-slate-900"
-                            >
-                              Ambil Foto
-                            </button>
-                            <button
-                              onClick={closeTeacherCamera}
-                              className="rounded-xl border border-white/30 px-4 py-2.5 text-sm font-bold text-white"
-                            >
-                              Tutup Kamera
-                            </button>
+                            <button type="button" onClick={captureTeacherSelfie} className="rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-slate-900">Ambil Foto</button>
+                            <button type="button" onClick={closeTeacherCamera} className="rounded-xl border border-white/30 px-4 py-2.5 text-sm font-bold text-white">Tutup Kamera</button>
                           </div>
+                        </div>
+                      )}
+
+                      {teacherAttendanceToday?.jam_masuk && teacherAttendanceToday?.jam_pulang && (
+                        <div className="mx-5 mb-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-center">
+                          <p className="text-sm font-bold text-emerald-700">✓ Absensi hari ini sudah lengkap</p>
+                          <p className="mt-1 text-xs text-emerald-600">Masuk {new Date(teacherAttendanceToday.jam_masuk).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB · Pulang {new Date(teacherAttendanceToday.jam_pulang).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB</p>
                         </div>
                       )}
                     </div>
                   )}
 
+                  {attendancePanel === "siswa" && (
+                  <>
+                  <div className="mb-6 rounded-2xl border border-blue-200 bg-white p-5 shadow-sm">
+                    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                      <div><h3 className="text-lg font-bold text-gray-900">Absen Siswa</h3><p className="text-sm text-gray-500">Ikuti urutan: pilih kelas → pilih tanggal → pilih mata pelajaran → isi absensi.</p></div>
+                      <button type="button" onClick={() => setAttendancePanel("menu")} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold text-gray-600 hover:bg-slate-50">← Kembali</button>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+                        <p className="mb-3 text-xs font-bold uppercase tracking-wide text-blue-700">1. Pilih Kelas</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(role === "Admin" ? attendanceClassOptions : Array.from(new Set([...teacherAssignments.map((a) => a.className), ...substituteAssignments.filter((a) => a.guruPenggantiId === currentUserId).map((a) => a.className)]))).map((className) => (
+                            <button key={className} type="button" onClick={() => { setAttendanceClass(className); setAttendanceClassChosen(true); setAttendanceDate(""); setAttendanceSubjectId(""); setAttendanceSaved(false); setStudentAttendance({}); }} className={`rounded-xl border px-3 py-2 text-sm font-bold ${attendanceClassChosen && attendanceClass === className ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-gray-700 hover:border-blue-300"}`}>{className}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className={`rounded-2xl border p-4 ${attendanceClassChosen ? "border-blue-100 bg-blue-50/60" : "border-slate-200 bg-slate-50"}`}>
+                        <p className="mb-3 text-xs font-bold uppercase tracking-wide text-blue-700">2. Pilih Tanggal</p>
+                        <input type="date" value={attendanceDate} onChange={(e) => { setAttendanceDate(e.target.value); setAttendanceSaved(false); setStudentAttendance({}); }} disabled={!attendanceClassChosen} className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm disabled:cursor-not-allowed disabled:bg-gray-100" />
+                        {!attendanceClassChosen && <p className="mt-2 text-xs text-gray-500">Pilih kelas terlebih dahulu.</p>}
+                      </div>
+                      <div className={`rounded-2xl border p-4 ${attendanceDate ? "border-blue-100 bg-blue-50/60" : "border-slate-200 bg-slate-50"}`}>
+                        <p className="mb-3 text-xs font-bold uppercase tracking-wide text-blue-700">3. Mata Pelajaran</p>
+                        <select value={attendanceSubjectId} onChange={(e) => { setAttendanceSubjectId(e.target.value); setAttendanceSaved(false); }} disabled={!attendanceDate} className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm disabled:cursor-not-allowed disabled:bg-gray-100">
+                          <option value="">Pilih mata pelajaran</option>
+                          {(role === "Admin"
+                            ? attendanceSubjects
+                            : Array.from(
+                                new Map<string, { id: string; name: string; code: string }>(
+                                  [
+                                    ...(isWaliKelas && teacherAssignments.some((a) => a.isWaliKelas && a.className === attendanceClass)
+                                      ? attendanceSubjects.filter((subject) => waliKelasSubjectNamesForClass(attendanceClass).has(subject.name))
+                                      : []),
+                                    ...teacherAssignments
+                                      .filter((a) => a.className === attendanceClass && a.subjectId)
+                                      .map((a) => ({ id: a.subjectId, name: a.subjectName, code: a.subjectCode })),
+                                  ].map((subject) => [subject.id, subject] as [string, { id: string; name: string; code: string }])
+                                ).values()
+                              )
+                          ).map((subject) => <option key={subject.id} value={subject.id}>{subject.code} - {subject.name}</option>)}
+                        </select>
+                        {!attendanceDate && <p className="mt-2 text-xs text-gray-500">Pilih tanggal terlebih dahulu.</p>}
+                      </div>
+                    </div>
+                  </div>
+                  {attendanceClassChosen && attendanceDate && attendanceSubjectId && (
+                  <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div><p className="text-xs font-bold uppercase tracking-wide text-blue-600">Siap mengisi</p><h3 className="text-lg font-bold text-gray-900">Kelas {attendanceClass} · {attendanceSubjects.find((s) => s.id === attendanceSubjectId)?.name ?? "Mata Pelajaran"}</h3><p className="text-sm text-gray-500">Tanggal {new Date(`${attendanceDate}T00:00:00`).toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p></div>
+                      <button type="button" onClick={saveStudentAttendance} disabled={attendanceSaving} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50">{attendanceSaving ? "Menyimpan..." : "Simpan Absensi Siswa"}</button>
+                    </div>
+                  </div>
+                  )}
+                  {attendanceClassChosen && attendanceDate && attendanceSubjectId && (
+                    <div className="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                      <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50 p-5 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-xs font-bold uppercase tracking-wide text-blue-600">Daftar Siswa</p>
+                          <h3 className="text-lg font-bold text-gray-900">Absensi Siswa Kelas {attendanceClass}</h3>
+                          <p className="text-sm text-gray-500">Pilih status setiap siswa: Hadir, Izin, Sakit, atau Alpa.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={saveStudentAttendance}
+                          disabled={attendanceSaving}
+                          className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {attendanceSaving ? "Menyimpan..." : "Simpan Absensi Siswa"}
+                        </button>
+                      </div>
+                      <div className="divide-y divide-slate-100">
+                        {attendanceStudents.filter((student) => student.class === attendanceClass).map((student) => (
+                          <div key={student.id} className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
+                            <div>
+                              <p className="font-semibold text-gray-900">{student.name}</p>
+                              <p className="text-xs text-gray-500">Kelas {student.class}</p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                              {attendanceStatuses.map((status) => {
+                                const active = studentAttendance[student.id] === status;
+                                return (
+                                  <button
+                                    key={status}
+                                    type="button"
+                                    onClick={() => updateStudentAttendance(student.id, status)}
+                                    className={`rounded-xl border px-4 py-2.5 text-sm font-bold transition ${
+                                      active
+                                        ? status === "Hadir"
+                                          ? "border-emerald-600 bg-emerald-600 text-white"
+                                          : status === "Izin"
+                                          ? "border-blue-600 bg-blue-600 text-white"
+                                          : status === "Sakit"
+                                          ? "border-amber-500 bg-amber-500 text-white"
+                                          : "border-rose-600 bg-rose-600 text-white"
+                                        : "border-slate-200 bg-white text-gray-600 hover:bg-slate-50"
+                                    }`}
+                                  >
+                                    {status}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="hidden">
                   <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                     <div className="grid gap-4 md:grid-cols-2">
                       <div>
@@ -5543,18 +6099,102 @@ export default function Home() {
                           className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                         >
                           <option value="">Pilih mata pelajaran</option>
-                          {(isWaliKelas ? attendanceSubjects.map((subject) => ({ subjectId: subject.id, subjectName: subject.name, subjectCode: subject.code })) : role === "Guru" ? teacherAssignments.filter((a) => a.className === attendanceClass && a.subjectId) : attendanceSubjects.map((subject) => ({ subjectId: subject.id, subjectName: subject.name, subjectCode: subject.code }))).map((subject) => (
+                          {(
+  role === "Admin"
+    ? attendanceSubjects.map((subject) => ({
+        subjectId: subject.id,
+        subjectName: subject.name,
+        subjectCode: subject.code,
+      }))
+    : Array.from(
+        new Map<
+          string,
+          {
+            subjectId: string;
+            subjectName: string;
+            subjectCode: string;
+          }
+        >(
+          [
+            ...(isWaliKelas && waliAttendanceClassNames.includes(attendanceClass)
+              ? attendanceSubjects.map((subject) => [
+                  subject.id,
+                  {
+                    subjectId: subject.id,
+                    subjectName: subject.name,
+                    subjectCode: subject.code,
+                  },
+                ] as [
+                  string,
+                  { subjectId: string; subjectName: string; subjectCode: string }
+                ])
+              : []),
+            ...teacherAssignments
+              .filter(
+                (a) =>
+                  a.className === attendanceClass &&
+                  a.subjectId
+              )
+              .map(
+                (a): [
+                  string,
+                  {
+                    subjectId: string;
+                    subjectName: string;
+                    subjectCode: string;
+                  }
+                ] => [
+                  a.subjectId,
+                  {
+                    subjectId: a.subjectId,
+                    subjectName: a.subjectName,
+                    subjectCode: a.subjectCode,
+                  },
+                ]
+              ),
+
+            ...substituteAssignments
+              .filter(
+                (a) =>
+                  a.className === attendanceClass &&
+                  a.guruPenggantiId === currentUserId &&
+                  a.tanggal === attendanceDate
+              )
+              .map(
+                (a): [
+                  string,
+                  {
+                    subjectId: string;
+                    subjectName: string;
+                    subjectCode: string;
+                  }
+                ] => [
+                  a.subjectId,
+                  {
+                    subjectId: a.subjectId,
+                    subjectName: a.subjectName,
+                    subjectCode: a.subjectCode,
+                  },
+                ]
+              ),
+          ]
+        ).values()
+      )
+).map((subject) => (
                             <option key={subject.subjectId} value={subject.subjectId}>
                               {subject.subjectCode} - {subject.subjectName}
                             </option>
                           ))}
                         </select>
                         {role === "Guru" && isWaliKelas && (
-                          <p className="mt-2 text-xs text-emerald-700">Wali kelas dapat memilih semua mata pelajaran. Hak simpan tetap diperiksa berdasarkan teaching_assignments.</p>
+                          <p className="mt-2 text-xs text-emerald-700">Wali kelas dapat mengisi absensi kelas yang diwalikan. Mata pelajaran pada kelas wali dapat dipilih untuk kebutuhan absensi dan penggantian guru.</p>
                         )}
-                        {role === "Guru" && !isWaliKelas && (
-                          <p className="mt-2 text-xs text-gray-500">Guru hanya dapat memilih mata pelajaran yang diampu pada kelas tersebut.</p>
-                        )}
+{role === "Guru" && !isWaliKelas && (
+  <p className="mt-2 text-xs text-gray-500">
+    Guru hanya dapat memilih mata pelajaran yang diampu atau yang
+    ditugaskan sebagai guru pengganti pada tanggal ini.
+  </p>
+)}
                       </div>
 
                       <div className="rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-700">
@@ -5645,9 +6285,26 @@ export default function Home() {
                                     setAttendanceDate(dateValue);
                                     setAttendanceSaved(false);
 
-                                    const nextClass = attendanceClassOptions.includes(attendanceClass)
+                                    const allowedCalendarClasses =
+                                      role === "Admin"
+                                        ? attendanceClassOptions
+                                        : Array.from(
+                                            new Set([
+                                              ...teacherAssignments
+                                                .filter((a) => a.subjectId)
+                                                .map((a) => a.className),
+                                              ...substituteAssignments
+                                                .filter(
+                                                  (a) =>
+                                                    a.guruPenggantiId === currentUserId &&
+                                                    a.tanggal === dateValue
+                                                )
+                                                .map((a) => a.className),
+                                            ])
+                                          );
+                                    const nextClass = allowedCalendarClasses.includes(attendanceClass)
                                       ? attendanceClass
-                                      : attendanceClassOptions[0] ?? "";
+                                      : allowedCalendarClasses[0] ?? "";
                                     setAttendanceClass(nextClass);
 
                                     const nextAttendance: Record<string, AttendanceStatus> = {};
@@ -5678,9 +6335,58 @@ export default function Home() {
                       );
                     })()}
                   </div>
+                  </div>
+                  </>
+                  )}
 
                   {attendanceDate && (
                     <>
+                      {attendancePanel === "pengganti" && (
+                      <>
+                      <div className="mb-6 grid gap-5 xl:grid-cols-2">
+                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5 shadow-sm">
+                          <div className="flex items-start justify-between gap-3"><div><h3 className="text-lg font-bold text-emerald-900">Guru Piket</h3><p className="mt-1 text-sm text-emerald-700">Petugas piket pada tanggal yang dipilih.</p></div><span className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-bold text-white">{dutyTeachers.length} petugas</span></div>
+                          {role === "Admin" && <div className="mt-4 rounded-2xl border border-emerald-200 bg-white p-4"><p className="mb-3 text-sm font-bold text-gray-800">Tambah Guru Piket</p><div className="grid gap-3 md:grid-cols-2"><select value={dutyTeacherId} onChange={(e) => setDutyTeacherId(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm"><option value="">Pilih guru</option>{allGuruProfiles.map((t) => <option key={t.id} value={t.id}>{t.nama}</option>)}</select><input value={dutyNote} onChange={(e) => setDutyNote(e.target.value)} placeholder="Keterangan (opsional)" className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm" /></div><button type="button" onClick={saveDutyAssignment} disabled={dutySaving} className="mt-3 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white disabled:opacity-50">{dutySaving ? "Menyimpan..." : "Tambah Guru Piket"}</button></div>}
+                          {substituteLoading ? <div className="mt-4 rounded-xl bg-white p-4 text-sm text-gray-500">Memuat data guru piket...</div> : dutyTeachers.length === 0 ? <div className="mt-4 rounded-xl border border-dashed border-emerald-300 bg-white p-4 text-sm text-emerald-700">Belum ada guru piket pada tanggal ini.</div> : <div className="mt-4 space-y-2">{dutyTeachers.map((t) => <div key={t.id} className="flex items-center justify-between gap-3 rounded-xl bg-white px-4 py-3"><div><p className="font-bold text-gray-900">{t.nama}</p><p className="text-xs text-gray-500">{t.email || "Guru"}</p></div><div className="flex items-center gap-2">{t.id === currentUserId && <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">Anda</span>}{role === "Admin" && <button type="button" onClick={() => removeDutyAssignment(t.id)} className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-bold text-rose-600">Hapus</button>}</div></div>)}</div>}
+                        </div>
+                        <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-5 shadow-sm"><h3 className="text-lg font-bold text-blue-900">Guru Pengganti</h3><p className="mt-1 text-sm text-blue-700">Guru mapel dapat menunjuk guru piket sebagai pengganti.</p>{role === "Guru" && (teacherAssignments.some((a) => a.subjectId) || isWaliKelas) && (
+                          <div className="mt-4 space-y-3 rounded-2xl border border-blue-200 bg-white p-4">
+                            <p className="text-sm text-blue-700">Guru mapel atau wali kelas dapat menunjuk guru piket sebagai pengganti. Guru pengganti harus sudah ditetapkan sebagai guru piket pada tanggal ini.</p>
+                            <select value={substituteClassId} onChange={(e) => { setSubstituteClassId(e.target.value); setSubstituteSubjectId(""); }} className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm">
+                              <option value="">Pilih kelas yang digantikan</option>
+                              {Array.from(new Map(teacherAssignments.filter((a) => a.className && (a.subjectId || a.isWaliKelas)).map((a) => [a.classId, a.className])).entries()).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                            </select>
+                            <select value={substituteSubjectId} onChange={(e) => setSubstituteSubjectId(e.target.value)} disabled={!substituteClassId} className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm disabled:bg-gray-100">
+                              <option value="">Pilih mata pelajaran</option>
+                              {(teacherAssignments.some((a) => a.isWaliKelas && a.classId === substituteClassId)
+                                ? attendanceSubjects
+                                : teacherAssignments.filter((a) => a.classId === substituteClassId && a.subjectId).map((a) => ({ id: a.subjectId, name: a.subjectName, code: a.subjectCode }))
+                              ).map((subject: any) => <option key={subject.id} value={subject.id}>{subject.code} - {subject.name}</option>)}
+                            </select>
+                            <select value={substituteTeacherId} onChange={(e) => setSubstituteTeacherId(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm">
+                              <option value="">Pilih guru piket pengganti</option>
+                              {dutyTeachers.filter((t) => t.id !== currentUserId).map((t) => <option key={t.id} value={t.id}>{t.nama}</option>)}
+                            </select>
+                            {dutyTeachers.filter((t) => t.id !== currentUserId).length === 0 && (
+                              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">Belum ada guru piket pada tanggal ini. Admin perlu menetapkan guru piket terlebih dahulu.</div>
+                            )}
+                            <input value={substituteNote} onChange={(e) => setSubstituteNote(e.target.value)} placeholder="Keterangan (opsional)" className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm" />
+                            <button type="button" onClick={saveSubstituteAssignment} disabled={substituteSaving || dutyTeachers.filter((t) => t.id !== currentUserId).length === 0} className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white disabled:opacity-50">{substituteSaving ? "Menyimpan..." : "Tentukan Guru Pengganti"}</button>
+                          </div>
+                        )}
+                          {role === "Guru" && !teacherAssignments.some((a) => a.subjectId) && (
+                            <div className="mt-4 rounded-2xl border border-dashed border-blue-300 bg-white p-4 text-sm text-blue-700">
+                              Anda terdaftar sebagai guru piket. Guru mapel yang berhalangan akan menunjuk Anda sebagai guru pengganti.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {substituteAssignments.length > 0 && <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h3 className="text-lg font-bold text-gray-900">Penugasan Pengganti Hari Ini</h3><div className="mt-4 space-y-3">{substituteAssignments.map((item) => <div key={item.id} className="rounded-xl border border-slate-200 p-4"><p className="font-bold text-gray-900">{item.className} — {item.subjectCode} - {item.subjectName}</p><p className="mt-1 text-sm text-gray-500">Guru asli: <span className="font-semibold">{item.guruAsliName}</span></p><p className="text-sm text-gray-500">Guru pengganti: <span className="font-semibold text-blue-700">{item.guruPenggantiName}</span></p>{item.guruPenggantiId === currentUserId && <span className="mt-2 inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">TUGAS ANDA</span>}</div>)}</div></div>}
+                      </>
+                      )}
+                      {attendancePanel === "siswa" && (
+                      <>
+                      <div className="hidden">
                       <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                         <div className="mb-4">
                           <h3 className="text-lg font-bold text-gray-900">Pilih Kelas</h3>
@@ -5698,7 +6404,7 @@ export default function Home() {
                         </div>
 
                         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-                          {attendanceClassOptions.map((className) => {
+                          {(role === "Admin" ? attendanceClassOptions : Array.from(new Set([...teacherAssignments.map((a) => a.className), ...substituteAssignments.filter((a) => a.guruPenggantiId === currentUserId && a.tanggal === attendanceDate).map((a) => a.className)]))).map((className) => {
                             const count = attendanceStudents.filter(
                               (student) => student.class === className
                             ).length;
@@ -5802,12 +6508,15 @@ export default function Home() {
                             ))}
                         </div>
                       </div>
+                      </div>
+                      </>
+                      )}
                     </>
                   )}
-                </>
-              )}
+                  </>
+                  )}
 
-              {role === "Guru" && (
+              {role === "Guru" && attendancePanel === "guru" && (
                 <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                   <h3 className="text-lg font-bold text-gray-900">Kehadiran Saya</h3>
                   <p className="mt-1 text-sm text-gray-500">
