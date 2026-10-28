@@ -1,7 +1,169 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { QRCodeSVG } from "qrcode.react";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { supabase } from "@/lib/supabase";
+
+async function safelyStopAndClearScanner(scanner: Html5Qrcode) {
+  try {
+    if (scanner.isScanning) await scanner.stop();
+  } catch {
+    // Kamera mungkin sudah berhenti atau belum selesai mulai.
+  }
+  try {
+    scanner.clear();
+  } catch {
+    // Elemen reader mungkin sudah dibersihkan.
+  }
+}
+
+function EmployeeQrScanner({ onScan }: { onScan: (token: string) => void }) {
+  const generatedId = useId();
+  const readerId = `employee-qr-reader-${generatedId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  const onScanRef = useRef(onScan);
+  const [cameraError, setCameraError] = useState("");
+  const [scanState, setScanState] = useState<"starting" | "scanning" | "success">("starting");
+
+  useEffect(() => { onScanRef.current = onScan; }, [onScan]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let decoded = false;
+    let startFinished = false;
+    let cleanupAfterStart = false;
+    let scanner: Html5Qrcode | null = null;
+
+    const cleanup = async () => {
+      if (!scanner) return;
+      // html5-qrcode may still be creating its video while start() is pending.
+      if (!startFinished) {
+        cleanupAfterStart = true;
+        return;
+      }
+      try {
+        if (scanner.isScanning) await scanner.stop();
+      } catch { /* Camera may already be stopped. */ }
+      try { scanner.clear(); } catch { /* Reader may already be cleared. */ }
+    };
+
+    const start = async () => {
+      const element = document.getElementById(readerId);
+      if (!element || cancelled) return;
+      try {
+        element.replaceChildren();
+        scanner = new Html5Qrcode(readerId, {
+          verbose: false,
+          formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+        });
+        await scanner.start(
+          { facingMode: { ideal: "environment" } },
+          {
+            fps: 10,
+            // Gunakan kotak deteksi QR yang cukup besar di tengah area kamera portrait.
+            qrbox: (width: number, height: number) => {
+              const side = Math.floor(Math.min(width * 0.82, height * 0.62, 280));
+              const safeSide = Math.max(160, side);
+              return { width: safeSide, height: safeSide };
+            },
+            aspectRatio: 3 / 4,
+            disableFlip: true,
+            videoConstraints: {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1080 },
+              height: { ideal: 1440 },
+            },
+          },
+          (decodedText) => {
+            const token = decodedText.trim();
+            if (cancelled || decoded || !token) return;
+            decoded = true;
+            setScanState("success");
+            onScanRef.current(token);
+            void cleanup();
+          },
+          () => { /* Keep scanning until a QR is recognized. */ },
+        );
+        startFinished = true;
+        if (cancelled || cleanupAfterStart) {
+          await cleanup();
+        } else {
+          setScanState("scanning");
+        }
+      } catch (error: unknown) {
+        startFinished = true;
+        if (!cancelled) {
+          setCameraError(error instanceof Error ? error.message : "Kamera tidak dapat dibuka. Periksa izin kamera browser.");
+        }
+        try { scanner?.clear(); } catch { /* Reader may not have initialized. */ }
+      }
+    };
+
+    void start();
+    return () => {
+      cancelled = true;
+      void cleanup();
+    };
+  }, [readerId]);
+
+  return (
+    <div className="mx-auto w-full min-w-0 max-w-md">
+      <style>{`
+        /* Area kamera portrait seperti kartu; jangan menumpuk canvas di atas video
+           karena dapat menutupi preview dan mengganggu area deteksi html5-qrcode. */
+        .employee-qr-camera { position: relative; width: 320px; aspect-ratio: 3 / 4; max-width: 100%; margin: 0 auto; overflow: hidden; border-radius: 16px; background: #0f172a; }
+        .employee-qr-camera > div { width: 100% !important; height: 100% !important; min-height: 0 !important; border: 0 !important; overflow: hidden !important; }
+        .employee-qr-camera [id$="__scan_region"] { width: 100% !important; min-height: 0 !important; border: 0 !important; overflow: hidden !important; }
+        .employee-qr-camera video { display: block !important; width: 100% !important; max-width: 100% !important; object-fit: cover !important; border-radius: 16px !important; }
+        .employee-qr-camera canvas { max-width: 100% !important; }
+        .employee-qr-camera [id$="__scan_region"] img, .employee-qr-camera [id$="__dashboard"] { display: none !important; }
+      `}</style>
+      <div className="mb-3 text-center">
+        <p className="text-sm font-semibold text-slate-800">
+          {scanState === "success" ? "QR berhasil dibaca" : scanState === "starting" ? "Menyiapkan kamera…" : "Arahkan QR kartu ke kamera"}
+        </p>
+        <p className="mt-1 text-xs leading-5 text-slate-500">
+          Posisikan satu QR di tengah kotak. Pastikan QR tajam, tidak silau, dan seluruh pola QR terlihat.
+        </p>
+      </div>
+      <div className="employee-qr-camera">
+        <div id={readerId} />
+      </div>
+      {cameraError && (
+        <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          Kamera tidak bisa dibuka: {cameraError}. Izinkan akses kamera browser dan buka portal melalui localhost atau HTTPS.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function downloadEmployeeQr(profileId: string, employeeName: string) {
+  const svg = document.getElementById(`employee-qr-${profileId}`);
+  if (!(svg instanceof SVGSVGElement)) {
+    alert("QR belum siap diunduh. Muat daftar QR terlebih dahulu.");
+    return;
+  }
+  const cloned = svg.cloneNode(true) as SVGSVGElement;
+  cloned.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  const source = new XMLSerializer().serializeToString(cloned);
+  const blob = new Blob([source], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const safeName = employeeName.trim().replace(/[^a-z0-9_-]+/gi, "-") || profileId;
+  link.href = url;
+  link.download = `QR-${safeName}.svg`;
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Jangan revoke URL langsung; beberapa browser membatalkan unduhan jika terlalu cepat.
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+// Koordinat sementara lokasi sekolah lama (sumber data pendidikan resmi).
+// Verifikasi di lokasi sebelum dipakai; setelah sekolah pindah, ubah koordinat ini.
+const SCHOOL_LOCATION = { latitude: -7.0547, longitude: 107.5678, radiusMeters: 100 };
 
 type Role = "Admin" | "Kepala Sekolah" | "Guru" | "Siswa" | "Orang Tua";
 
@@ -705,7 +867,23 @@ export default function Home() {
     ruang: "",
   });
   const [scheduleSaving, setScheduleSaving] = useState(false);
-  const [attendancePanel, setAttendancePanel] = useState<"menu" | "siswa" | "guru">("menu");
+  const [attendancePanel, setAttendancePanel] = useState<"menu" | "siswa" | "guru" | "rekap-guru" | "rekap-siswa" | "qr-pegawai" | "scan-qr">("menu");
+  const [teacherAttendanceRows, setTeacherAttendanceRows] = useState<(TeacherAttendanceToday & { guru_id: string; nama_guru: string; role_label: string; attendancePercentage: number; attendedWorkdays: number; workdaysElapsed: number })[]>([]);
+  const [teacherAttendanceReportLoading, setTeacherAttendanceReportLoading] = useState(false);
+  const [employeeQrRows, setEmployeeQrRows] = useState<{ profile_id: string; qr_token: string; is_active: boolean; nama: string; role: string; foto_url: string | null }[]>([]);
+  const [ownEmployeeQr, setOwnEmployeeQr] = useState<{ qr_token: string; is_active: boolean } | null>(null);
+  const [ownEmployeeQrLoading, setOwnEmployeeQrLoading] = useState(false);
+  const [ownEmployeeQrError, setOwnEmployeeQrError] = useState("");
+  const [ownQrScannerOpen, setOwnQrScannerOpen] = useState(false);
+  const [ownQrScannerMessage, setOwnQrScannerMessage] = useState("");
+  const [employeeQrLoading, setEmployeeQrLoading] = useState(false);
+  const [employeeQrError, setEmployeeQrError] = useState("");
+  const [scannedEmployee, setScannedEmployee] = useState<{ profile_id: string; qr_token: string; nama: string; role: string; foto_url: string | null } | null>(null);
+  const [qrAttendanceMode, setQrAttendanceMode] = useState<"masuk" | "pulang">("masuk");
+  const [qrAttendanceBusy, setQrAttendanceBusy] = useState(false);
+  const [qrAttendanceResult, setQrAttendanceResult] = useState<{ nama: string; mode: string; time: string; address: string; status: string } | null>(null);
+
+  const [teacherAttendanceReportError, setTeacherAttendanceReportError] = useState("");
   const [attendanceClassChosen, setAttendanceClassChosen] = useState(false);
   const [attendanceClass, setAttendanceClass] = useState("1");
   const [studentAttendance, setStudentAttendance] = useState<Record<string, AttendanceStatus>>({});
@@ -716,12 +894,17 @@ export default function Home() {
     selfie_masuk: string | null;
     jam_pulang: string | null;
     selfie_pulang: string | null;
+    latitude_masuk?: number | null;
+    longitude_masuk?: number | null;
+    alamat_masuk?: string | null;
+    latitude_pulang?: number | null;
+    longitude_pulang?: number | null;
+    alamat_pulang?: string | null;
   };
   const [teacherAttendanceToday, setTeacherAttendanceToday] = useState<TeacherAttendanceToday | null>(null);
   const [teacherAttendanceMode, setTeacherAttendanceMode] = useState<"masuk" | "pulang">("masuk");
-  const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
-  const [cameraOpen, setCameraOpen] = useState(false);
-  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [locationChecking, setLocationChecking] = useState(false);
+  const [teacherLocationStatus, setTeacherLocationStatus] = useState("");
   const [attendanceSaving, setAttendanceSaving] = useState(false);
   const [attendanceSaved, setAttendanceSaved] = useState(false);
   const today = new Date();
@@ -2787,7 +2970,7 @@ export default function Home() {
     setTeacherAssignments([]);
     setTeacherAttendanceToday(null);
     setTeacherAttendanceMode("masuk");
-    setSelfiePreview(null);
+    setTeacherLocationStatus("");
     setAttendanceSubjectId("");
     setAttendanceRecords({});
     setStudentAttendance({});
@@ -2807,38 +2990,50 @@ export default function Home() {
     setAttendanceSaved(false);
   };
 
-  const openTeacherCamera = async () => {
-    try {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        alert("Kamera tidak tersedia di perangkat ini.");
+  const getDistanceMeters = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const toRad = (value: number) => (value * Math.PI) / 180;
+    const earthRadius = 6371000;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+
+  const getCurrentTeacherLocation = (): Promise<{ latitude: number; longitude: number; accuracy: number }> =>
+    new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error("Perangkat/browser tidak mendukung GPS."));
         return;
       }
+      navigator.geolocation.getCurrentPosition(
+        (position) => resolve({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+        }),
+        (error) => reject(new Error(error.code === 1 ? "Izin lokasi ditolak. Aktifkan izin lokasi untuk SIAKAD." : error.code === 2 ? "Lokasi tidak dapat ditemukan. Aktifkan GPS lalu coba lagi." : "Permintaan lokasi terlalu lama. Coba lagi di area terbuka.")),
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+      );
+    });
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
-        audio: false,
-      });
-
-      setCameraStream(stream);
-      setCameraOpen(true);
-    } catch (error) {
-      console.error(error);
-      alert("Kamera tidak bisa dibuka. Pastikan izin kamera sudah diberikan.");
+  const getApproximateAddress = async (latitude: number, longitude: number) => {
+    try {
+      // Koordinat dikirim ke layanan OpenStreetMap Nominatim untuk mencari alamat perkiraan.
+      const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`, { headers: { Accept: "application/json" } });
+      if (!response.ok) return "Alamat tidak tersedia; koordinat tersimpan";
+      const data = await response.json();
+      return typeof data.display_name === "string" ? data.display_name : "Alamat tidak tersedia; koordinat tersimpan";
+    } catch {
+      return "Alamat tidak tersedia; koordinat tersimpan";
     }
   };
 
-  const closeTeacherCamera = () => {
-    cameraStream?.getTracks().forEach((track) => track.stop());
-    setCameraStream(null);
-    setCameraOpen(false);
-  };
-
   const loadTeacherAttendanceToday = async () => {
-    if (!currentUserId || !attendanceDate || role !== "Guru") return;
+    if (!currentUserId || !attendanceDate || !["Guru", "Admin", "Kepala Sekolah"].includes(role)) return;
 
     const { data, error } = await supabase
       .from("teacher_attendance")
-      .select("id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang")
+      .select("id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang, latitude_masuk, longitude_masuk, alamat_masuk, latitude_pulang, longitude_pulang, alamat_pulang")
       .eq("guru_id", currentUserId)
       .eq("tanggal", attendanceDate)
       .maybeSingle();
@@ -2853,32 +3048,311 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (loggedIn && role === "Guru" && currentUserId && attendanceDate) {
+    if (loggedIn && ["Guru", "Admin", "Kepala Sekolah"].includes(role) && currentUserId && attendanceDate) {
       void loadTeacherAttendanceToday();
     }
   }, [loggedIn, role, currentUserId, attendanceDate]);
 
-  const captureTeacherSelfie = () => {
-    const video = document.getElementById("teacher-selfie-video") as HTMLVideoElement | null;
-
-    if (!video || video.videoWidth === 0 || video.videoHeight === 0) {
-      alert("Kamera belum siap. Tunggu sebentar lalu coba lagi.");
+  const exportTeacherAttendanceMonthlyPdf = async () => {
+    if (role !== "Admin" || !currentUserId) {
+      alert("Laporan PDF absensi pegawai hanya dapat diakses admin.");
       return;
     }
 
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    try {
+      const jakartaToday = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+      const [year, month] = jakartaToday.split("-").map(Number);
+      const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+      const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("id-ID", { month: "long", year: "numeric" });
 
-    const context = canvas.getContext("2d");
-    if (!context) {
-      alert("Gagal mengambil selfie.");
+      const [{ data: profiles, error: profileError }, { data: attendanceData, error: attendanceError }] = await Promise.all([
+        supabase.from("profiles").select("id, nama, role").in("role", ["guru", "admin", "kepala_sekolah"]),
+        supabase
+          .from("teacher_attendance")
+          .select("id, guru_id, tanggal, jam_masuk, jam_pulang, latitude_masuk, longitude_masuk, alamat_masuk, latitude_pulang, longitude_pulang, alamat_pulang")
+          .gte("tanggal", monthStart)
+          .lte("tanggal", jakartaToday)
+          .order("tanggal", { ascending: true }),
+      ]);
+
+      if (profileError) throw profileError;
+      if (attendanceError) throw attendanceError;
+
+      const workDates: string[] = [];
+      for (let date = new Date(`${monthStart}T12:00:00+07:00`); date <= new Date(`${jakartaToday}T12:00:00+07:00`); date.setDate(date.getDate() + 1)) {
+        const day = date.getDay();
+        if (day !== 0 && day !== 6) {
+          workDates.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`);
+        }
+      }
+
+      const roleLabels: Record<string, string> = { guru: "Guru", admin: "Admin", kepala_sekolah: "Kepala Sekolah" };
+      const reportRows = (profiles ?? []).map((profile: any, index: number) => {
+        const roleValue = String(profile.role ?? "").toLowerCase();
+        const records = (attendanceData ?? []).filter((item: any) => item.guru_id === profile.id && item.tanggal >= monthStart && item.tanggal <= jakartaToday);
+        const presentDates = new Set(records.filter((item: any) => Boolean(item.jam_masuk) && workDates.includes(item.tanggal)).map((item: any) => item.tanggal));
+        const lateCount = records.filter((item: any) => {
+          if (!item.jam_masuk || !workDates.includes(item.tanggal)) return false;
+          const time = new Date(item.jam_masuk).toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false });
+          return time > "06:30";
+        }).length;
+        const hasGps = records.some((item: any) =>
+          item.latitude_masuk != null || item.longitude_masuk != null ||
+          item.latitude_pulang != null || item.longitude_pulang != null ||
+          item.alamat_masuk || item.alamat_pulang
+        );
+        const isAdmin = roleValue === "admin";
+        const percentage = !isAdmin && workDates.length ? Math.round((presentDates.size / workDates.length) * 100) : null;
+        return [
+          index + 1,
+          String(profile.nama ?? "Nama belum diatur"),
+          roleLabels[roleValue] ?? String(profile.role ?? "Pegawai"),
+          "—", // NIP tidak ditambahkan ke query karena keberadaan kolomnya belum dikonfirmasi.
+          `${presentDates.size}/${workDates.length} hari`,
+          isAdmin ? "— (tidak wajib)" : `${lateCount} 🔴`,
+          percentage == null ? "—" : `${percentage}%`,
+          hasGps ? "GPS tercatat" : "Belum ada data GPS",
+        ];
+      }).sort((a: any, b: any) => {
+        const order: Record<string, number> = { "Kepala Sekolah": 0, Admin: 1, Guru: 2 };
+        return (order[String(a[2])] ?? 3) - (order[String(b[2])] ?? 3) || String(a[1]).localeCompare(String(b[1]), "id");
+      }).map((row: any, index: number) => [index + 1, ...row.slice(1)]);
+
+      printTablePdf(
+        `Laporan Rekap Bulanan Absensi Pegawai — ${monthLabel}`,
+        ["No.", "Nama Pegawai", "Jabatan", "NIP", "Hadir", "Terlambat", "Persentase", "Lokasi"],
+        reportRows
+      );
+    } catch (error) {
+      alert(`Gagal membuat laporan PDF: ${error instanceof Error ? error.message : "Terjadi kesalahan."}`);
+    }
+  };
+
+  const loadTeacherAttendanceReport = async () => {
+    if (!currentUserId || (role !== "Admin" && role !== "Kepala Sekolah")) return;
+    setTeacherAttendanceReportLoading(true);
+    setTeacherAttendanceReportError("");
+    try {
+      const [{ data: profiles, error: profileError }, { data: attendanceData, error: attendanceError }] = await Promise.all([
+        supabase.from("profiles").select("id, nama, role").in("role", ["guru", "admin", "kepala_sekolah"]),
+        supabase
+          .from("teacher_attendance")
+          .select("id, guru_id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang, latitude_masuk, longitude_masuk, alamat_masuk, latitude_pulang, longitude_pulang, alamat_pulang")
+          .order("tanggal", { ascending: false }),
+      ]);
+      if (profileError) throw profileError;
+      if (attendanceError) throw attendanceError;
+
+      const jakartaToday = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+      const [year, month] = jakartaToday.split("-").map(Number);
+      const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+      const workDates: string[] = [];
+      for (let date = new Date(`${monthStart}T12:00:00+07:00`); date <= new Date(`${jakartaToday}T12:00:00+07:00`); date.setDate(date.getDate() + 1)) {
+        const day = date.getDay();
+        if (day !== 0 && day !== 6) workDates.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`);
+      }
+
+      const rows = attendanceData ?? [];
+      const roleLabels: Record<string, string> = {
+        guru: "Guru",
+        admin: "Admin",
+        kepala_sekolah: "Kepala Sekolah",
+      };
+      const reportRows = (profiles ?? []).map((profile: any) => {
+        const personRecords = rows.filter((item: any) => item.guru_id === profile.id && item.tanggal >= monthStart && item.tanggal <= jakartaToday);
+        const attendedDates = new Set(personRecords.filter((item: any) => Boolean(item.jam_masuk) && workDates.includes(item.tanggal)).map((item: any) => item.tanggal));
+        const latestRecord = personRecords[0];
+        const attendedWorkdays = attendedDates.size;
+        const attendancePercentage = workDates.length ? Math.round((attendedWorkdays / workDates.length) * 100) : 0;
+        return {
+          id: String(profile.id),
+          guru_id: String(profile.id),
+          nama_guru: String(profile.nama ?? "Nama belum diatur"),
+          role_label: roleLabels[String(profile.role ?? "").toLowerCase()] ?? String(profile.role ?? "Pegawai"),
+          tanggal: String(latestRecord?.tanggal ?? jakartaToday),
+          jam_masuk: latestRecord?.jam_masuk ?? null,
+          selfie_masuk: latestRecord?.selfie_masuk ?? null,
+          jam_pulang: latestRecord?.jam_pulang ?? null,
+          selfie_pulang: latestRecord?.selfie_pulang ?? null,
+          latitude_masuk: latestRecord?.latitude_masuk ?? null,
+          longitude_masuk: latestRecord?.longitude_masuk ?? null,
+          alamat_masuk: latestRecord?.alamat_masuk ?? null,
+          latitude_pulang: latestRecord?.latitude_pulang ?? null,
+          longitude_pulang: latestRecord?.longitude_pulang ?? null,
+          alamat_pulang: latestRecord?.alamat_pulang ?? null,
+          attendancePercentage,
+          attendedWorkdays,
+          workdaysElapsed: workDates.length,
+        };
+      }).sort((a: any, b: any) => {
+        const roleOrder: Record<string, number> = { "Kepala Sekolah": 0, Admin: 1, Guru: 2 };
+        return (roleOrder[a.role_label] ?? 3) - (roleOrder[b.role_label] ?? 3) || a.nama_guru.localeCompare(b.nama_guru, "id");
+      });
+      setTeacherAttendanceRows(reportRows);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Gagal memuat rekap absensi pegawai.";
+      setTeacherAttendanceReportError(message);
+    } finally {
+      setTeacherAttendanceReportLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (loggedIn && currentUserId && (role === "Admin" || role === "Kepala Sekolah")) {
+      void loadTeacherAttendanceReport();
+    }
+  }, [loggedIn, currentUserId, role]);
+
+  const loadOwnEmployeeQr = async () => {
+    if (!currentUserId || !["Guru", "Admin", "Kepala Sekolah"].includes(role)) return;
+    setOwnEmployeeQrLoading(true);
+    setOwnEmployeeQrError("");
+    try {
+      const { data, error } = await supabase
+        .from("teacher_attendance_qr")
+        .select("qr_token, is_active")
+        .eq("profile_id", currentUserId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) {
+        setOwnEmployeeQr(null);
+        setOwnEmployeeQrError("QR pribadi belum dibuat. Minta admin membuka menu Kelola QR Pegawai satu kali untuk membuat QR semua pegawai.");
+        return;
+      }
+      if (!data.is_active) {
+        setOwnEmployeeQr(data);
+        setOwnEmployeeQrError("QR pribadi sedang dinonaktifkan. Hubungi admin sekolah.");
+        return;
+      }
+      setOwnEmployeeQr(data);
+    } catch (error) {
+      setOwnEmployeeQrError(error instanceof Error ? error.message : "QR pribadi belum dapat dimuat.");
+    } finally {
+      setOwnEmployeeQrLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (loggedIn && currentUserId && ["Guru", "Admin", "Kepala Sekolah"].includes(role)) {
+      void loadOwnEmployeeQr();
+    } else {
+      setOwnEmployeeQr(null);
+    }
+  }, [loggedIn, currentUserId, role]);
+
+  const loadEmployeeQrRows = async () => {
+    if (role !== "Admin") return;
+    setEmployeeQrLoading(true);
+    setEmployeeQrError("");
+    try {
+      const { data: profiles, error: profileError } = await supabase
+        .from("profiles").select("id, nama, role, foto_url")
+        .in("role", ["admin", "kepala_sekolah", "guru"]).order("nama");
+      if (profileError) throw profileError;
+      const { data: qrRows, error: qrError } = await supabase
+        .from("teacher_attendance_qr").select("profile_id, qr_token, is_active");
+      if (qrError) throw qrError;
+      const qrByProfile = new Map((qrRows || []).map((row: any) => [row.profile_id, row]));
+      const missing = (profiles || []).filter((profile: any) => !qrByProfile.has(profile.id));
+      if (missing.length) {
+        const { error: createError } = await supabase.from("teacher_attendance_qr")
+          .insert(missing.map((profile: any) => ({ profile_id: profile.id })));
+        if (createError) throw createError;
+        const { data: refreshed, error: refreshError } = await supabase
+          .from("teacher_attendance_qr").select("profile_id, qr_token, is_active");
+        if (refreshError) throw refreshError;
+        (refreshed || []).forEach((row: any) => qrByProfile.set(row.profile_id, row));
+      }
+      setEmployeeQrRows((profiles || []).map((profile: any) => {
+        const qr: any = qrByProfile.get(profile.id);
+        return { profile_id: profile.id, nama: profile.nama, role: profile.role, foto_url: profile.foto_url, qr_token: qr?.qr_token || "", is_active: qr?.is_active ?? true };
+      }).filter((row: any) => row.qr_token));
+    } catch (error) {
+      setEmployeeQrError(error instanceof Error ? error.message : "Gagal memuat QR pegawai.");
+    } finally {
+      setEmployeeQrLoading(false);
+    }
+  };
+
+  const handleEmployeeQrScan = async (token: string) => {
+    if (role !== "Admin") return;
+    setEmployeeQrError("");
+    const { data: qr, error } = await supabase.from("teacher_attendance_qr")
+      .select("profile_id, qr_token, is_active").eq("qr_token", token).eq("is_active", true).maybeSingle();
+    if (error || !qr) {
+      setScannedEmployee(null);
+      setEmployeeQrError("QR tidak ditemukan atau sudah dinonaktifkan.");
       return;
     }
+    const { data: profile, error: profileError } = await supabase.from("profiles")
+      .select("id, nama, role, foto_url").eq("id", qr.profile_id).maybeSingle();
+    if (profileError || !profile || !["admin", "kepala_sekolah", "guru"].includes(profile.role)) {
+      setScannedEmployee(null);
+      setEmployeeQrError("Profil pegawai untuk QR ini tidak ditemukan.");
+      return;
+    }
+    setScannedEmployee({ profile_id: profile.id, qr_token: qr.qr_token, nama: profile.nama, role: profile.role, foto_url: profile.foto_url });
+    setEmployeeQrError("");
+  };
 
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    setSelfiePreview(canvas.toDataURL("image/jpeg", 0.85));
-    closeTeacherCamera();
+  const recordScannedEmployeeAttendance = async () => {
+    if (role !== "Admin" || !scannedEmployee) return;
+    const now = new Date();
+    const jakartaToday = now.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+    const jakartaDay = new Date(`${jakartaToday}T12:00:00+07:00`).getDay();
+    if (jakartaDay === 0 || jakartaDay === 6) { setEmployeeQrError("Absensi hanya tersedia Senin–Jumat."); return; }
+    setQrAttendanceBusy(true);
+    setEmployeeQrError("");
+    try {
+      const { data: existing, error: existingError } = await supabase.from("teacher_attendance")
+        .select("id, jam_masuk, jam_pulang").eq("guru_id", scannedEmployee.profile_id).eq("tanggal", jakartaToday).maybeSingle();
+      if (existingError) throw existingError;
+      if (qrAttendanceMode === "masuk" && existing?.jam_masuk) throw new Error("Pegawai ini sudah tercatat absen masuk hari ini.");
+      if (qrAttendanceMode === "pulang" && !existing?.jam_masuk) throw new Error("Pegawai harus absen masuk terlebih dahulu.");
+      if (qrAttendanceMode === "pulang" && existing?.jam_pulang) throw new Error("Pegawai ini sudah tercatat absen pulang hari ini.");
+      if (!navigator.geolocation) throw new Error("Perangkat ini tidak mendukung GPS.");
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }));
+      const { latitude, longitude, accuracy } = position.coords;
+      if (accuracy > 100) throw new Error(`Akurasi GPS kurang baik (${Math.round(accuracy)} m). Coba aktifkan lokasi presisi.`);
+      const distance = getDistanceMeters(latitude, longitude, SCHOOL_LOCATION.latitude, SCHOOL_LOCATION.longitude);
+      if (distance > SCHOOL_LOCATION.radiusMeters) throw new Error(`Lokasi sekitar ${Math.round(distance)} m dari titik uji sekolah, melebihi batas ${SCHOOL_LOCATION.radiusMeters} m.`);
+      const address = await getApproximateAddress(latitude, longitude);
+      const timestamp = new Date().toISOString();
+      const timeLabel = new Date(timestamp).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" });
+      const isLate = new Date(timestamp).toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }) > "06:30";
+      const statusLabel = qrAttendanceMode === "masuk" ? (isLate ? "Terlambat" : "Tepat waktu") : "Absen pulang";
+      if (qrAttendanceMode === "masuk") {
+        const payload = { guru_id: scannedEmployee.profile_id, tanggal: jakartaToday, jam_masuk: timestamp, latitude_masuk: latitude, longitude_masuk: longitude, alamat_masuk: address, keterangan: statusLabel };
+        const { error: saveError } = await supabase.from("teacher_attendance").insert(payload);
+        if (saveError) throw saveError;
+      } else {
+        const { error: saveError } = await supabase.from("teacher_attendance").update({ jam_pulang: timestamp, updated_at: timestamp, latitude_pulang: latitude, longitude_pulang: longitude, alamat_pulang: address }).eq("id", existing?.id).is("jam_pulang", null);
+        if (saveError) throw saveError;
+      }
+      setQrAttendanceResult({ nama: scannedEmployee.nama, mode: qrAttendanceMode, time: timeLabel, address, status: statusLabel });
+      alert(`Absensi ${qrAttendanceMode} ${scannedEmployee.nama} berhasil disimpan.`);
+      setScannedEmployee(null);
+    } catch (error) {
+      setEmployeeQrError(error instanceof Error ? error.message : "Absensi QR gagal disimpan.");
+    } finally {
+      setQrAttendanceBusy(false);
+    }
+  };
+
+  const handleOwnAttendanceQrScan = async (token: string) => {
+    if (!ownEmployeeQr?.is_active || !ownEmployeeQr.qr_token) {
+      setOwnQrScannerMessage("QR pribadi belum tersedia. Minta admin membuat QR pegawai terlebih dahulu.");
+      setOwnQrScannerOpen(false);
+      return;
+    }
+    if (token.trim() !== ownEmployeeQr.qr_token) {
+      setOwnQrScannerMessage("QR tidak cocok dengan akun yang sedang login. Silakan pindai kartu QR milik Anda sendiri.");
+      setOwnQrScannerOpen(false);
+      return;
+    }
+    setOwnQrScannerMessage("QR cocok. Memverifikasi GPS dan menyimpan absensi...");
+    setOwnQrScannerOpen(false);
+    await confirmTeacherAttendance();
   };
 
   const confirmTeacherAttendance = async () => {
@@ -2886,104 +3360,80 @@ export default function Home() {
       alert("Sesi login tidak ditemukan. Silakan login kembali.");
       return;
     }
-
-    if (!selfiePreview) {
-      alert("Ambil selfie terlebih dahulu.");
+    const jakartaToday = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+    const jakartaDay = new Date(`${jakartaToday}T12:00:00+07:00`).getDay();
+    if (jakartaDay === 0 || jakartaDay === 6) {
+      alert("Absensi tidak tersedia pada hari Sabtu dan Minggu.");
       return;
     }
-
+    if (!["Guru", "Admin", "Kepala Sekolah"].includes(role)) {
+      alert("Akun ini tidak memiliki akses absensi pribadi.");
+      return;
+    }
     if (teacherAttendanceMode === "pulang" && !teacherAttendanceToday?.jam_masuk) {
       alert("Anda harus melakukan absen masuk terlebih dahulu.");
       return;
     }
-
     if (teacherAttendanceMode === "pulang" && teacherAttendanceToday?.jam_pulang) {
       alert("Absen pulang hari ini sudah tersimpan.");
       return;
     }
-
     if (teacherAttendanceMode === "masuk" && teacherAttendanceToday?.jam_masuk) {
       alert("Absen masuk hari ini sudah tersimpan.");
       return;
     }
 
     setAttendanceSaving(true);
-
+    setLocationChecking(true);
+    setTeacherLocationStatus("Memeriksa lokasi perangkat...");
     try {
-      const now = new Date();
-      const timestamp = now.toISOString();
-      const isMasuk = teacherAttendanceMode === "masuk";
-      const filePath = `${currentUserId}/${attendanceDate}/${isMasuk ? "masuk" : "pulang"}.jpg`;
-
-      const response = await fetch(selfiePreview);
-      const blob = await response.blob();
-
-      const { error: uploadError } = await supabase.storage
-        .from("teacher-attendance")
-        .upload(filePath, blob, {
-          contentType: "image/jpeg",
-          upsert: true,
-        });
-
-      if (uploadError) {
-        console.error("Gagal upload selfie guru:", uploadError);
-        alert(`Foto gagal disimpan: ${uploadError.message}`);
-        return;
+      const location = await getCurrentTeacherLocation();
+      const distance = getDistanceMeters(location.latitude, location.longitude, SCHOOL_LOCATION.latitude, SCHOOL_LOCATION.longitude);
+      if (location.accuracy > 100) {
+        throw new Error(`Akurasi GPS belum cukup (${Math.round(location.accuracy)} meter). Aktifkan lokasi presisi dan coba lagi.`);
       }
+      if (distance > SCHOOL_LOCATION.radiusMeters) {
+        throw new Error(`Absensi ditolak. Lokasi terdeteksi sekitar ${Math.round(distance)} meter dari titik sekolah, sedangkan batasnya ${SCHOOL_LOCATION.radiusMeters} meter.`);
+      }
+
+      const address = await getApproximateAddress(location.latitude, location.longitude);
+      const timestamp = new Date().toISOString();
+      const isMasuk = teacherAttendanceMode === "masuk";
+      const locationFields = isMasuk
+        ? { latitude_masuk: location.latitude, longitude_masuk: location.longitude, alamat_masuk: address }
+        : { latitude_pulang: location.latitude, longitude_pulang: location.longitude, alamat_pulang: address };
 
       if (isMasuk) {
         const { data, error } = await supabase
           .from("teacher_attendance")
-          .upsert(
-            {
-              guru_id: currentUserId,
-              tanggal: attendanceDate,
-              jam_masuk: timestamp,
-              selfie_masuk: filePath,
-            },
-            { onConflict: "guru_id,tanggal" }
-          )
-          .select("id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang")
+          .upsert({ guru_id: currentUserId, tanggal: attendanceDate, jam_masuk: timestamp, ...locationFields }, { onConflict: "guru_id,tanggal" })
+          .select("id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang, latitude_masuk, longitude_masuk, alamat_masuk, latitude_pulang, longitude_pulang, alamat_pulang")
           .single();
-
-        if (error) {
-          console.error("Gagal menyimpan absen masuk:", error);
-          alert(`Absen masuk gagal disimpan: ${error.message}`);
-          return;
-        }
-
+        if (error) throw new Error(`Absen masuk gagal disimpan: ${error.message}`);
         setTeacherAttendanceToday(data);
         setTeacherAttendanceMode("pulang");
-        setSelfiePreview(null);
-        alert("✅ Absen masuk berhasil disimpan.");
+        setTeacherLocationStatus(`Lokasi terverifikasi (${Math.round(distance)} m dari titik sekolah).`);
+        alert("Absen masuk berhasil disimpan. Lokasi berada dalam area sekolah.");
       } else {
         const { data, error } = await supabase
           .from("teacher_attendance")
-          .update({
-            jam_pulang: timestamp,
-            selfie_pulang: filePath,
-            updated_at: timestamp,
-          })
+          .update({ jam_pulang: timestamp, updated_at: timestamp, ...locationFields })
           .eq("id", teacherAttendanceToday?.id ?? "")
           .is("jam_pulang", null)
-          .select("id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang")
+          .select("id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang, latitude_masuk, longitude_masuk, alamat_masuk, latitude_pulang, longitude_pulang, alamat_pulang")
           .single();
-
-        if (error) {
-          console.error("Gagal menyimpan absen pulang:", error);
-          alert(`Absen pulang gagal disimpan: ${error.message}`);
-          return;
-        }
-
+        if (error) throw new Error(`Absen pulang gagal disimpan: ${error.message}`);
         setTeacherAttendanceToday(data);
-        setSelfiePreview(null);
-        alert("✅ Absen pulang berhasil disimpan.");
+        setTeacherLocationStatus(`Lokasi terverifikasi (${Math.round(distance)} m dari titik sekolah).`);
+        alert("Absen pulang berhasil disimpan. Lokasi berada dalam area sekolah.");
       }
     } catch (error) {
-      console.error(error);
-      alert("Terjadi kesalahan saat menyimpan absensi guru.");
+      const message = error instanceof Error ? error.message : "Terjadi kesalahan saat memverifikasi lokasi.";
+      setTeacherLocationStatus(message);
+      alert(message);
     } finally {
       setAttendanceSaving(false);
+      setLocationChecking(false);
     }
   };
 
@@ -4051,7 +4501,7 @@ export default function Home() {
     }
 
     if (menuName !== "Absensi") {
-      closeTeacherCamera();
+  
     }
 
     try {
@@ -6419,127 +6869,178 @@ export default function Home() {
                   <button type="button" onClick={() => exportAttendance("pdf")} className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700">📄 PDF</button>
                 </div>
               </div>
-              {(role === "Admin" || role === "Guru") && (
+              {(role === "Admin" || role === "Guru" || role === "Kepala Sekolah") && (
                 <div className="mb-6 grid gap-4 md:grid-cols-3">
-                  <button type="button" onClick={() => { setAttendancePanel("siswa"); setAttendanceClassChosen(false); setAttendanceDate(""); }} className={`rounded-2xl border p-5 text-left transition ${attendancePanel === "siswa" ? "border-blue-600 bg-blue-50 shadow-sm" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50"}`}>
-                    <div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-xl text-white">👨‍🎓</div><div><p className="font-bold text-gray-900">Absen Siswa</p><p className="text-xs text-gray-500">Pilih kelas → tanggal → isi absensi</p></div></div>
+                  <button type="button" onClick={() => {
+                    if (role === "Kepala Sekolah") { setAttendancePanel("rekap-siswa"); }
+                    else { setAttendancePanel("siswa"); setAttendanceClassChosen(false); setAttendanceDate(""); }
+                  }} className={`rounded-2xl border p-5 text-left transition ${attendancePanel === "siswa" || attendancePanel === "rekap-siswa" ? "border-blue-600 bg-blue-50 shadow-sm" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50"}`}>
+                    <div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-xl text-white">👨‍🎓</div><div><p className="font-bold text-gray-900">{role === "Kepala Sekolah" ? "Cek Absensi Siswa" : "Absen Siswa"}</p><p className="text-xs text-gray-500">{role === "Kepala Sekolah" ? "Lihat rekap kehadiran siswa" : "Pilih kelas → tanggal → isi absensi"}</p></div></div>
                   </button>
-                  {role === "Guru" && (
-                    <button type="button" onClick={() => { setAttendancePanel("guru"); setAttendanceDate(todayDateString); }} className={`rounded-2xl border p-5 text-left transition ${attendancePanel === "guru" ? "border-emerald-600 bg-emerald-50 shadow-sm" : "border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50"}`}>
-                      <div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-600 text-xl text-white">📸</div><div><p className="font-bold text-gray-900">Absensi Kehadiran Guru</p><p className="text-xs text-gray-500">Absen masuk/pulang dengan selfie</p></div></div>
+                  {(role === "Admin" || role === "Kepala Sekolah") && (
+                    <button type="button" onClick={() => { setAttendancePanel("rekap-guru"); void loadTeacherAttendanceReport(); }} className={`rounded-2xl border p-5 text-left transition ${attendancePanel === "rekap-guru" ? "border-violet-600 bg-violet-50 shadow-sm" : "border-slate-200 bg-white hover:border-violet-300 hover:bg-violet-50"}`}>
+                      <div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-600 text-xl text-white">👥</div><div><p className="font-bold text-gray-900">Cek Absensi Guru</p><p className="text-xs text-gray-500">Lihat jam masuk, pulang, dan keterlambatan</p></div></div>
                     </button>
+                  )}
+                  {(role === "Guru" || role === "Admin" || role === "Kepala Sekolah") && (
+                    <button type="button" onClick={() => { setAttendancePanel("guru"); setAttendanceDate(todayDateString); }} className={`rounded-2xl border p-5 text-left transition ${attendancePanel === "guru" ? "border-emerald-600 bg-emerald-50 shadow-sm" : "border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50"}`}>
+                      <div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-600 text-xl text-white">📍</div><div><p className="font-bold text-gray-900">Absensi Kehadiran Guru</p><p className="text-xs text-gray-500">Absen masuk/pulang dengan GPS sekolah</p></div></div>
+                    </button>
+                  )}
+                  {role === "Admin" && (
+                    <>
+                      <button type="button" onClick={() => { setAttendancePanel("qr-pegawai"); void loadEmployeeQrRows(); }} className={`rounded-2xl border p-5 text-left transition ${attendancePanel === "qr-pegawai" ? "border-amber-600 bg-amber-50 shadow-sm" : "border-slate-200 bg-white hover:border-amber-300 hover:bg-amber-50"}`}>
+                        <div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-500 text-xl text-white">▦</div><div><p className="font-bold text-gray-900">Kelola QR Pegawai</p><p className="text-xs text-gray-500">Buat dan tampilkan QR unik setiap pegawai</p></div></div>
+                      </button>
+                    </>
                   )}
                 </div>
               )}
-              {(role === "Admin" || role === "Guru") && (
+              {role === "Admin" && attendancePanel === "qr-pegawai" && (
+                <div className="mb-6 rounded-2xl border border-amber-100 bg-white shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-100 bg-amber-50 px-5 py-4"><div><h3 className="font-bold text-gray-900">QR Unik Pegawai</h3><p className="text-sm text-gray-600">QR dibuat dari token acak; hanya admin yang dapat mengelolanya.</p></div><button type="button" onClick={() => setAttendancePanel("menu")} className="rounded-xl border bg-white px-3 py-2 text-sm font-bold">← Kembali</button></div>
+                  <div className="p-5">
+                    {employeeQrLoading ? <p className="py-6 text-center text-sm text-gray-500">Memuat QR pegawai…</p> : employeeQrError ? <p className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">{employeeQrError}</p> : null}
+                    <button type="button" onClick={() => void loadEmployeeQrRows()} className="mb-4 rounded-xl bg-amber-600 px-4 py-2 text-sm font-bold text-white">Muat / Perbarui Daftar QR</button>
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{employeeQrRows.map((row) => <div key={row.profile_id} className="rounded-2xl border border-slate-200 p-4 text-center">
+                      {row.foto_url ? <img src={row.foto_url} alt={`Foto ${row.nama}`} className="mx-auto mb-3 h-16 w-16 rounded-full object-cover" /> : <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 text-2xl font-bold text-slate-600">{row.nama.charAt(0).toUpperCase()}</div>}
+                      <p className="font-bold text-gray-900">{row.nama}</p><p className="mb-3 text-xs capitalize text-gray-500">{row.role.replace("_", " ")}</p>
+                      <div className="inline-block rounded-xl bg-white p-2"><QRCodeSVG id={`employee-qr-${row.profile_id}`} value={row.qr_token} size={220} level="M" /></div>
+                      <p className="mt-2 break-all text-[10px] text-gray-400">Token QR unik</p>
+                      <div className="mt-3 flex flex-wrap justify-center gap-2"><button type="button" onClick={() => downloadEmployeeQr(row.profile_id, row.nama)} className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">Unduh QR (SVG)</button><button type="button" onClick={() => window.print()} className="rounded-lg border px-3 py-2 text-xs font-bold text-gray-700">Cetak kartu / QR</button></div>
+                    </div>)}</div>
+                    {!employeeQrLoading && employeeQrRows.length === 0 && !employeeQrError && <p className="py-5 text-center text-sm text-gray-500">Tekan “Muat / Perbarui Daftar QR” untuk membuat QR otomatis.</p>}
+                  </div>
+                </div>
+              )}
+              {role === "Admin" && attendancePanel === "scan-qr" && (
+                <div className="mb-6 rounded-2xl border border-cyan-100 bg-white shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-cyan-100 bg-cyan-50 px-5 py-4"><div><h3 className="font-bold text-gray-900">Pemindai QR Absensi Pegawai</h3><p className="text-sm text-gray-600">Pindai QR, verifikasi nama dan foto, lalu pilih jenis absensi.</p></div><button type="button" onClick={() => { setAttendancePanel("menu"); setScannedEmployee(null); }} className="rounded-xl border bg-white px-3 py-2 text-sm font-bold">← Kembali</button></div>
+                  <div className="grid gap-5 p-5 md:grid-cols-2">
+                    <div><EmployeeQrScanner onScan={handleEmployeeQrScan} /><p className="mt-2 text-xs text-gray-500">Izinkan akses kamera. Jika kamera tidak berjalan, pastikan situs dibuka melalui HTTPS atau localhost.</p></div>
+                    <div>
+                      {qrAttendanceResult && <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4"><p className="font-bold text-emerald-800">Absensi berhasil tersimpan</p><p className="mt-1 text-sm text-gray-800">{qrAttendanceResult.nama} · {qrAttendanceResult.mode === "masuk" ? "Absen masuk" : "Absen pulang"}</p><p className="text-sm text-gray-700">Waktu: {qrAttendanceResult.time} WIB</p><p className={`mt-1 text-sm font-bold ${qrAttendanceResult.status === "Terlambat" ? "text-red-700" : "text-emerald-700"}`}>Status: {qrAttendanceResult.status}</p><p className="mt-1 text-xs text-gray-600">Lokasi: {qrAttendanceResult.address}</p></div>}
+                      {scannedEmployee ? <div className="rounded-2xl border border-cyan-200 p-4 text-center">
+                        {scannedEmployee.foto_url ? <img src={scannedEmployee.foto_url} alt={`Foto ${scannedEmployee.nama}`} className="mx-auto mb-3 h-20 w-20 rounded-full object-cover" /> : <div className="mx-auto mb-3 flex h-20 w-20 items-center justify-center rounded-full bg-cyan-100 text-3xl font-bold text-cyan-800">{scannedEmployee.nama.charAt(0).toUpperCase()}</div>}
+                        <h4 className="text-lg font-bold text-gray-900">{scannedEmployee.nama}</h4><p className="mb-4 text-sm capitalize text-gray-500">{scannedEmployee.role.replace("_", " ")}</p>
+                        <div className="mb-4 grid grid-cols-2 gap-2"><button type="button" onClick={() => setQrAttendanceMode("masuk")} className={`rounded-xl border p-3 text-sm font-bold ${qrAttendanceMode === "masuk" ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-200"}`}>Absen Masuk</button><button type="button" onClick={() => setQrAttendanceMode("pulang")} className={`rounded-xl border p-3 text-sm font-bold ${qrAttendanceMode === "pulang" ? "border-blue-500 bg-blue-50 text-blue-800" : "border-slate-200"}`}>Absen Pulang</button></div>
+                        <button type="button" disabled={qrAttendanceBusy} onClick={() => void recordScannedEmployeeAttendance()} className="w-full rounded-xl bg-cyan-700 px-4 py-3 text-sm font-bold text-white disabled:opacity-50">{qrAttendanceBusy ? "Menyimpan…" : "Konfirmasi Absensi"}</button>
+                      </div> : <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-gray-500">Hasil scan dan identitas pegawai akan muncul di sini.</div>}
+                      {employeeQrError && <p className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">{employeeQrError}</p>}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {(role === "Admin" || role === "Kepala Sekolah" || role === "Guru") && (
                 <>
-                  {role === "Guru" && attendancePanel === "guru" && (
+                  {["Guru", "Admin", "Kepala Sekolah"].includes(role) && attendancePanel === "guru" && (
                     <div className="mb-6 overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm">
                       <div className="border-b border-emerald-100 bg-emerald-50 px-5 py-4">
                         <p className="text-sm font-semibold text-emerald-700">Absensi Guru</p>
                         <h3 className="mt-1 text-lg font-bold text-gray-900">Kehadiran di Sekolah</h3>
-                        <p className="mt-1 text-sm text-gray-600">Absen masuk dan pulang menggunakan selfie kamera. Satu guru hanya dapat memiliki satu record per tanggal.</p>
+                        <p className="mt-1 text-sm text-gray-600">Absensi datang dan pulang menggunakan akun guru serta GPS. Foto selfie tidak digunakan.</p>
                       </div>
-
-                      <div className="grid gap-4 p-5 md:grid-cols-2">
-                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-5">
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-600 text-xl">🌅</div>
-                            <div>
-                              <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">Absen Masuk</p>
-                              <p className="font-bold text-gray-900">{teacherAttendanceToday?.jam_masuk ? "Sudah absen" : "Belum absen"}</p>
-                            </div>
-                          </div>
-
-                          {teacherAttendanceToday?.jam_masuk ? (
-                            <div className="mt-4 rounded-xl bg-white p-4">
-                              <p className="text-xs text-gray-500">Jam masuk</p>
-                              <p className="mt-1 text-2xl font-black text-emerald-700">
-                                {new Date(teacherAttendanceToday.jam_masuk).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB
-                              </p>
-                              <span className="mt-2 inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">✓ Tersimpan</span>
-                            </div>
+                      <div className="p-5">
+                        <div className="mb-5 flex items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          {userProfile.fotoUrl ? (
+                            <img src={userProfile.fotoUrl} alt={`Foto profil ${userProfile.nama || name}`} className="h-16 w-16 shrink-0 rounded-full border-2 border-white object-cover shadow-sm" onError={(event) => { event.currentTarget.style.display = "none"; }} />
                           ) : (
-                            <button
-                              type="button"
-                              onClick={() => { setTeacherAttendanceMode("masuk"); setSelfiePreview(null); void openTeacherCamera(); }}
-                              disabled={attendanceSaving}
-                              className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
-                            >
-                              📸 Absen Masuk
-                            </button>
-                          )}
-                        </div>
-
-                        <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-5">
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-xl">🌇</div>
-                            <div>
-                              <p className="text-xs font-bold uppercase tracking-wide text-blue-700">Absen Pulang</p>
-                              <p className="font-bold text-gray-900">{teacherAttendanceToday?.jam_pulang ? "Sudah absen" : teacherAttendanceToday?.jam_masuk ? "Siap absen pulang" : "Belum tersedia"}</p>
-                            </div>
-                          </div>
-
-                          {teacherAttendanceToday?.jam_pulang ? (
-                            <div className="mt-4 rounded-xl bg-white p-4">
-                              <p className="text-xs text-gray-500">Jam pulang</p>
-                              <p className="mt-1 text-2xl font-black text-blue-700">
-                                {new Date(teacherAttendanceToday.jam_pulang).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB
-                              </p>
-                              <span className="mt-2 inline-flex rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">✓ Tersimpan</span>
-                            </div>
-                          ) : teacherAttendanceToday?.jam_masuk ? (
-                            <button
-                              type="button"
-                              onClick={() => { setTeacherAttendanceMode("pulang"); setSelfiePreview(null); void openTeacherCamera(); }}
-                              disabled={attendanceSaving}
-                              className="mt-4 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
-                            >
-                              📸 Absen Pulang
-                            </button>
-                          ) : (
-                            <div className="mt-4 rounded-xl bg-gray-100 p-4 text-center">
-                              <p className="text-sm font-semibold text-gray-500">Absen masuk terlebih dahulu</p>
+                            <div aria-label="Foto profil belum tersedia" className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-2xl font-bold text-emerald-700">
+                              {(userProfile.nama || name || "P").trim().charAt(0).toUpperCase()}
                             </div>
                           )}
+                          <div className="min-w-0">
+                            <p className="truncate font-bold text-gray-900">{userProfile.nama || name || "Nama belum tersedia"}</p>
+                            <p className="mt-1 text-sm text-gray-600">{role}</p>
+                            <p className="mt-1 text-xs text-gray-500">Foto mengikuti profil akun. Tidak ada pengambilan atau unggah selfie saat absensi.</p>
+                          </div>
+                        </div>
+                        <div className="mb-5 flex flex-col items-center gap-3 rounded-2xl border border-violet-200 bg-violet-50/60 p-4 text-center sm:flex-row sm:text-left">
+                          <div className="shrink-0 rounded-xl bg-white p-2 shadow-sm">
+                            {ownEmployeeQr?.is_active && ownEmployeeQr.qr_token ? <QRCodeSVG value={ownEmployeeQr.qr_token} size={112} level="M" /> : <div className="flex h-28 w-28 items-center justify-center text-xs text-slate-400">QR belum tersedia</div>}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-bold text-violet-900">QR Pribadi Pegawai</p>
+                            <p className="mt-1 text-sm text-violet-800">{userProfile.nama || name} · {role}</p>
+                            <p className="mt-1 text-xs text-slate-600">Gunakan kartu QR yang diberikan admin. Saat absen masuk atau pulang, kamera akan memindai kartu dan memastikan QR sesuai dengan akun yang sedang login.</p>
+                            {ownEmployeeQrLoading && <p className="mt-2 text-xs text-slate-500">Memuat QR pribadi…</p>}
+                            {ownEmployeeQrError && <p className="mt-2 text-xs font-medium text-amber-800">{ownEmployeeQrError}</p>}
+                            <button type="button" onClick={() => void loadOwnEmployeeQr()} className="mt-2 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs font-bold text-violet-800">Muat ulang QR</button>
+                          </div>
+                        </div>
+                        {ownQrScannerOpen && (
+                          <div className="mb-5 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                            <div className="mb-3 flex items-center justify-between gap-3">
+                              <div><p className="font-bold text-violet-900">Pindai kartu QR Anda</p><p className="text-sm text-violet-800">Arahkan kamera ke QR pada kartu yang dicetak admin.</p></div>
+                              <button type="button" onClick={() => setOwnQrScannerOpen(false)} className="rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm font-semibold">Batal</button>
+                            </div>
+                            <EmployeeQrScanner onScan={(token) => { void handleOwnAttendanceQrScan(token); }} />
+                          </div>
+                        )}
+                        {ownQrScannerMessage && <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">{ownQrScannerMessage}</div>}
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-5">
+                            <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">Absen Masuk</p>
+                            <p className="mt-1 font-bold text-gray-900">{teacherAttendanceToday?.jam_masuk ? "Sudah absen" : "Belum absen"}</p>
+                            {teacherAttendanceToday?.jam_masuk ? <div className="mt-4 rounded-xl bg-white p-4"><p className="text-xs text-gray-500">Jam masuk</p><p className="mt-1 text-2xl font-black text-emerald-700">{new Date(teacherAttendanceToday.jam_masuk).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB</p><p className="mt-2 text-xs text-gray-600">{teacherAttendanceToday.alamat_masuk || "Alamat belum tersedia"}</p></div> : <button type="button" onClick={() => { setTeacherAttendanceMode("masuk"); setOwnQrScannerMessage(""); if (!ownEmployeeQr?.is_active || !ownEmployeeQr.qr_token) { setOwnQrScannerMessage("QR pribadi belum tersedia. Minta admin membuat QR pegawai terlebih dahulu."); return; } setOwnQrScannerOpen(true); }} disabled={attendanceSaving || ownEmployeeQrLoading} className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">{locationChecking && teacherAttendanceMode === "masuk" ? "Memeriksa GPS..." : "📷 Scan QR & Absen Masuk"}</button>}
+                          </div>
+                          <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-5">
+                            <p className="text-xs font-bold uppercase tracking-wide text-blue-700">Absen Pulang</p>
+                            <p className="mt-1 font-bold text-gray-900">{teacherAttendanceToday?.jam_pulang ? "Sudah absen" : teacherAttendanceToday?.jam_masuk ? "Siap absen pulang" : "Belum tersedia"}</p>
+                            {teacherAttendanceToday?.jam_pulang ? <div className="mt-4 rounded-xl bg-white p-4"><p className="text-xs text-gray-500">Jam pulang</p><p className="mt-1 text-2xl font-black text-blue-700">{new Date(teacherAttendanceToday.jam_pulang).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB</p><p className="mt-2 text-xs text-gray-600">{teacherAttendanceToday.alamat_pulang || "Alamat belum tersedia"}</p></div> : teacherAttendanceToday?.jam_masuk ? <button type="button" onClick={() => { setTeacherAttendanceMode("pulang"); setOwnQrScannerMessage(""); if (!ownEmployeeQr?.is_active || !ownEmployeeQr.qr_token) { setOwnQrScannerMessage("QR pribadi belum tersedia. Minta admin membuat QR pegawai terlebih dahulu."); return; } setOwnQrScannerOpen(true); }} disabled={attendanceSaving || ownEmployeeQrLoading} className="mt-4 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50">{locationChecking && teacherAttendanceMode === "pulang" ? "Memeriksa GPS..." : "📷 Scan QR & Absen Pulang"}</button> : <div className="mt-4 rounded-xl bg-gray-100 p-4 text-center"><p className="text-sm font-semibold text-gray-500">Absen masuk terlebih dahulu</p></div>}
+                          </div>
                         </div>
                       </div>
+                      {teacherLocationStatus && <div className="mx-5 mb-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-gray-700">{teacherLocationStatus}</div>}
+                      {teacherAttendanceToday?.jam_masuk && teacherAttendanceToday?.jam_pulang && <div className="mx-5 mb-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-center"><p className="text-sm font-bold text-emerald-700">✓ Absensi hari ini sudah lengkap</p><p className="mt-1 text-xs text-emerald-600">Masuk {new Date(teacherAttendanceToday.jam_masuk).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB · Pulang {new Date(teacherAttendanceToday.jam_pulang).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB</p></div>}
+                    </div>
+                  )}
 
-                      {selfiePreview && (
-                        <div className="mx-5 mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                            <img src={selfiePreview} alt="Preview selfie guru" className="h-32 w-32 rounded-2xl border border-slate-200 object-cover" />
-                            <div className="flex-1">
-                              <p className="font-bold text-gray-900">{teacherAttendanceMode === "masuk" ? "Selfie Absen Masuk" : "Selfie Absen Pulang"}</p>
-                              <p className="mt-1 text-sm text-gray-500">Pastikan foto jelas sebelum disimpan.</p>
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                <button type="button" onClick={confirmTeacherAttendance} disabled={attendanceSaving} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50">
-                                  {attendanceSaving ? "Menyimpan..." : teacherAttendanceMode === "masuk" ? "Konfirmasi Absen Masuk" : "Konfirmasi Absen Pulang"}
-                                </button>
-                                <button type="button" onClick={() => setSelfiePreview(null)} disabled={attendanceSaving} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-gray-700">Ambil Ulang</button>
-                              </div>
-                            </div>
+                  {attendancePanel === "rekap-guru" && (role === "Admin" || role === "Kepala Sekolah") && (
+                    <div className="mb-6 overflow-hidden rounded-2xl border border-violet-100 bg-white shadow-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-violet-100 bg-violet-50 px-5 py-4">
+                        <div>
+                          <p className="text-sm font-semibold text-violet-700">Rekap Absensi Guru</p>
+                          <h3 className="mt-1 text-lg font-bold text-gray-900">Kehadiran Seluruh Guru</h3>
+                          <p className="mt-1 text-sm text-gray-600">Hari kerja Senin–Jumat. Batas masuk tepat waktu pukul 06.30 WIB. Cetak PDF rekap bulanan tersedia untuk admin.</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                           {role === "Admin" && <button type="button" onClick={() => void exportTeacherAttendanceMonthlyPdf()} className="rounded-xl bg-violet-600 px-3 py-2 text-sm font-bold text-white hover:bg-violet-700">Cetak / Simpan PDF Bulanan</button>}
+                           <button type="button" onClick={() => setAttendancePanel("menu")} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-gray-600 hover:bg-slate-50">← Kembali</button>
+                         </div>
+                      </div>
+                      <div className="p-5">
+                        {teacherAttendanceReportLoading ? (
+                          <p className="py-8 text-center text-sm text-gray-500">Memuat rekap absensi pegawai...</p>
+                        ) : teacherAttendanceReportError ? (
+                          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{teacherAttendanceReportError}</div>
+                        ) : teacherAttendanceRows.length === 0 ? (
+                          <p className="py-8 text-center text-sm text-gray-500">Belum ada akun guru, kepala sekolah, atau admin pada data profil.</p>
+                        ) : (
+                          <>
+                          <div className="mb-4 rounded-xl border border-violet-100 bg-violet-50 p-4">
+                            <p className="font-bold text-violet-900">Persentase Kehadiran Pegawai — Bulan Berjalan</p>
+                            <p className="mt-1 text-sm text-violet-800">Daftar mencakup semua akun guru, kepala sekolah, dan admin. Persentase dihitung dari hari kerja Senin–Jumat sejak awal bulan sampai hari ini; akun tanpa catatan absensi tetap ditampilkan dengan persentase 0%.</p>
                           </div>
-                        </div>
-                      )}
-
-                      {cameraOpen && (
-                        <div className="mx-5 mb-5 rounded-2xl border border-slate-200 bg-slate-950 p-4">
-                          <p className="mb-3 text-center text-sm font-bold text-white">{teacherAttendanceMode === "masuk" ? "Selfie Absen Masuk" : "Selfie Absen Pulang"}</p>
-                          <video id="teacher-selfie-video" autoPlay playsInline muted ref={(element) => { if (element && cameraStream) element.srcObject = cameraStream; }} className="mx-auto max-h-[360px] w-full max-w-xl rounded-xl object-cover" />
-                          <div className="mt-3 flex flex-wrap justify-center gap-2">
-                            <button type="button" onClick={captureTeacherSelfie} className="rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-slate-900">Ambil Foto</button>
-                            <button type="button" onClick={closeTeacherCamera} className="rounded-xl border border-white/30 px-4 py-2.5 text-sm font-bold text-white">Tutup Kamera</button>
+                          <div className="overflow-x-auto">
+                            <table className="w-full min-w-[620px] border-collapse text-left text-sm">
+                              <thead><tr className="border-b bg-slate-50 text-xs uppercase text-slate-500"><th className="p-3">No.</th><th className="p-3">Nama Pegawai</th><th className="p-3">Jabatan</th><th className="p-3">Hari Hadir</th><th className="p-3">Persentase Kehadiran</th></tr></thead>
+                              <tbody>
+                                {teacherAttendanceRows.map((row, index) => (
+                                  <tr key={row.guru_id} className="border-b border-slate-100">
+                                    <td className="p-3 text-gray-500">{index + 1}</td>
+                                    <td className="p-3 font-semibold text-gray-900">{row.nama_guru}</td>
+                                    <td className="p-3">{row.role_label}</td>
+                                    <td className="p-3">{row.attendedWorkdays}/{row.workdaysElapsed} hari kerja</td>
+                                    <td className="p-3"><span className="font-bold text-violet-700">{row.attendancePercentage}%</span><div className="mt-2 h-2 w-28 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-violet-600" style={{ width: `${row.attendancePercentage}%` }} /></div></td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
                           </div>
-                        </div>
-                      )}
-
-                      {teacherAttendanceToday?.jam_masuk && teacherAttendanceToday?.jam_pulang && (
-                        <div className="mx-5 mb-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-center">
-                          <p className="text-sm font-bold text-emerald-700">✓ Absensi hari ini sudah lengkap</p>
-                          <p className="mt-1 text-xs text-emerald-600">Masuk {new Date(teacherAttendanceToday.jam_masuk).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB · Pulang {new Date(teacherAttendanceToday.jam_pulang).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB</p>
-                        </div>
-                      )}
+                          </>
+                        )}
+                      </div>
                     </div>
                   )}
 
@@ -7015,31 +7516,13 @@ export default function Home() {
                   </>
                   )}
 
-              {role === "Guru" && attendancePanel === "guru" && (
-                <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <h3 className="text-lg font-bold text-gray-900">Kehadiran Saya</h3>
-                  <p className="mt-1 text-sm text-gray-500">
-                    Persentase kehadiran guru berdasarkan konfirmasi kehadiran.
-                  </p>
-                  <div className="mt-4 flex items-center justify-between rounded-2xl bg-slate-50 p-5">
-                    <div>
-                      <p className="text-sm text-gray-500">Kehadiran guru tahun 2026</p>
-                      <p className="mt-1 text-3xl font-black text-blue-600">95%</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-semibold text-emerald-600">Hadir 19 hari</p>
-                      <p className="text-xs text-gray-500">dari 20 hari tercatat</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {role !== "Admin" && role !== "Guru" && (
+              {role !== "Admin" && role !== "Guru" && attendancePanel === "rekap-siswa" && (
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-blue-100 bg-blue-50 p-5">
-                    <h3 className="text-lg font-bold text-gray-900">
-                      Rekap Kehadiran
-                    </h3>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <h3 className="text-lg font-bold text-gray-900">Rekap Kehadiran Siswa</h3>
+                      {attendancePanel === "rekap-siswa" && <button type="button" onClick={() => setAttendancePanel("menu")} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-gray-600 hover:bg-slate-50">← Kembali</button>}
+                    </div>
                     <p className="mt-1 text-sm text-gray-600">
                       Akun ini hanya dapat melihat persentase kehadiran. Pengisian status siswa dilakukan oleh Admin atau Guru sesuai kelas dan mata pelajaran yang diampu.
                     </p>
