@@ -910,6 +910,8 @@ export default function Home() {
   const today = new Date();
   const todayDateString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
   const [attendanceDate, setAttendanceDate] = useState(todayDateString);
+  const [selectedPdfAttendanceDate, setSelectedPdfAttendanceDate] = useState(todayDateString);
+  const [selectedPdfAttendanceMonth, setSelectedPdfAttendanceMonth] = useState(todayDateString.slice(0, 7));
   const [attendanceMonth, setAttendanceMonth] = useState(today.getMonth());
   const [attendanceYear] = useState(today.getFullYear());
   const [attendanceRecords, setAttendanceRecords] = useState<Record<string, AttendanceStatus>>({});
@@ -1198,8 +1200,8 @@ export default function Home() {
     URL.revokeObjectURL(url);
   };
 
-  const printTablePdf = (title: string, headers: string[], rows: (string | number)[][]) => {
-    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+  const printTablePdf = (title: string, headers: string[], rows: (string | number)[][], targetWindow?: Window | null) => {
+    const printWindow = targetWindow ?? window.open("", "_blank");
     if (!printWindow) {
       alert("Popup diblokir browser. Izinkan popup untuk mencetak PDF.");
       return;
@@ -1220,6 +1222,90 @@ export default function Home() {
     const title = "Rekap Nilai Siswa";
     if (mode === "excel") downloadExcelTable(`Rekap_Nilai_${new Date().toISOString().slice(0,10)}.xls`, title, headers, rows);
     else printTablePdf(title, headers, rows);
+  };
+
+  const exportStudentAttendanceBySubjectMonthlyPdf = async () => {
+    // Buka tab secara langsung saat klik agar tidak mudah diblokir browser.
+    const reportWindow = window.open("", "_blank");
+    if (!reportWindow) {
+      alert("Popup diblokir browser. Izinkan popup untuk portal sekolah, lalu coba lagi.");
+      return;
+    }
+    reportWindow.document.write("<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Menyiapkan rekap absensi</title></head><body style='font-family:Arial;padding:24px'>Menyiapkan rekap absensi siswa...</body></html>");
+    const monthStart = `${attendanceYear}-${String(attendanceMonth + 1).padStart(2, "0")}-01`;
+    const daysInMonth = new Date(attendanceYear, attendanceMonth + 1, 0).getDate();
+    const monthEnd = `${attendanceYear}-${String(attendanceMonth + 1).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
+
+    const [{ data: studentRows, error: studentsError }, { data: attendanceRows, error: attendanceError }] = await Promise.all([
+      supabase.from("students").select("id, nama, nis, nisn, kelas, class_id, classes(nama)").order("nama"),
+      supabase.from("attendance").select("student_id, tanggal, status, subject_id, class_id, subjects(nama), classes(nama)").gte("tanggal", monthStart).lte("tanggal", monthEnd),
+    ]);
+    if (studentsError || attendanceError) {
+      reportWindow.close();
+      alert(`Gagal mengambil data rekap: ${(studentsError ?? attendanceError)?.message ?? "Kesalahan tidak diketahui"}`);
+      return;
+    }
+
+    // Admin dapat melihat seluruh kelas. Wali kelas hanya melihat kelas yang
+    // memang ditugaskan kepadanya; guru mapel bukan pengguna fitur laporan ini.
+    if (role !== "Admin" && !isWaliKelas) {
+      reportWindow.close();
+      alert("PDF rekap bulanan hanya tersedia untuk Admin dan Wali Kelas.");
+      return;
+    }
+    const allowedWaliClassIds = new Set(
+      teacherAssignments.filter((assignment) => assignment.isWaliKelas).map((assignment) => assignment.classId)
+    );
+    const students = (studentRows ?? []).filter((x: any) =>
+      x.class_id && (role === "Admin" || allowedWaliClassIds.has(x.class_id))
+    ).map((x: any) => ({
+      id: x.id, name: x.nama ?? "", nis: x.nis ?? "", nisn: x.nisn ?? "",
+      classId: x.class_id, className: x.classes?.nama ?? x.kelas ?? "-",
+    }));
+    const allowedStudentIds = new Set(students.map((student: any) => student.id));
+    const attendance = (attendanceRows ?? []).filter((row: any) =>
+      allowedStudentIds.has(row.student_id) && (role === "Admin" || allowedWaliClassIds.has(row.class_id ?? students.find((student: any) => student.id === row.student_id)?.classId))
+    );
+    const groups = new Map<string, { subjectId: string; subjectName: string; classId: string; className: string }>();
+    for (const row of attendance as any[]) {
+      if (!row.subject_id) continue;
+      const student = students.find((x: any) => x.id === row.student_id);
+      const classId = row.class_id ?? student?.classId;
+      const className = row.classes?.nama ?? student?.className ?? "-";
+      if (!classId) continue;
+      const subjectName = row.subjects?.nama ?? attendanceSubjects.find((x) => x.id === row.subject_id)?.name ?? "Mata Pelajaran";
+      const key = `${row.subject_id}:${classId}`;
+      if (!groups.has(key)) groups.set(key, { subjectId: row.subject_id, subjectName, classId, className });
+    }
+    // Jika bulan tersebut belum memiliki absensi, jangan mengarang mapel atau status.
+    if (!groups.size) {
+      reportWindow.document.body.innerHTML = "<p>Belum ada catatan absensi bermata pelajaran pada bulan yang dipilih.</p>";
+      return;
+    }
+    const esc = (v: unknown) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;");
+    const monthLabel = new Date(attendanceYear, attendanceMonth, 1).toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+    const pages = Array.from(groups.values()).map((group) => {
+      const classStudents = students.filter((x: any) => x.classId === group.classId).sort((a: any, b: any) => a.name.localeCompare(b.name, "id"));
+      const byStudentDate = new Map<string, string>();
+      for (const row of attendance as any[]) {
+        if (row.subject_id !== group.subjectId) continue;
+        const st = students.find((x: any) => x.id === row.student_id);
+        if (!st || st.classId !== group.classId) continue;
+        const day = Number(String(row.tanggal).slice(8, 10));
+        byStudentDate.set(`${row.student_id}:${day}`, String(row.status ?? ""));
+      }
+      const dates = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+      const bodyRows = classStudents.map((student: any, i: number) => {
+        const statuses = dates.map((day) => byStudentDate.get(`${student.id}:${day}`) ?? "");
+        const count = (s: string) => statuses.filter((x) => x.toLowerCase() === s.toLowerCase()).length;
+        return `<tr><td>${i + 1}</td><td>${esc(student.nisn || student.nis || "-")}</td><td class="name">${esc(student.name)}</td><td>${esc(student.className)}</td>${statuses.map((x) => `<td>${esc(x ? ({Hadir:"H", Sakit:"S", Izin:"I", Alpa:"A"} as Record<string,string>)[x] ?? x : "")}</td>`).join("")}<td>${count("Hadir")}</td><td>${count("Sakit")}</td><td>${count("Izin")}</td><td>${count("Alpa")}</td></tr>`;
+      }).join("");
+      const headers = dates.map((d) => `<th>${String(d).padStart(2, "0")}</th>`).join("");
+      return `<section class="page"><h1>${esc(schoolSettings.namaSekolah || "SD Islam Al-Barkah")}</h1><h2>REKAP ABSENSI SISWA PER MATA PELAJARAN</h2><p>Mapel: <b>${esc(group.subjectName)}</b> &nbsp; | &nbsp; Kelas: <b>${esc(group.className)}</b> &nbsp; | &nbsp; Periode: ${esc(monthLabel)}</p><table><thead><tr><th>No.</th><th>NISN / NIS</th><th>Nama Siswa</th><th>Kelas</th>${headers}<th>H</th><th>S</th><th>I</th><th>A</th></tr></thead><tbody>${bodyRows}</tbody></table><p class="legend">H = Hadir · S = Sakit · I = Izin · A = Alpa. Kolom kosong berarti belum ada catatan absensi, bukan otomatis alpa.</p></section>`;
+    }).join("");
+    reportWindow.document.open();
+    reportWindow.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Rekap Absensi ${esc(monthLabel)}</title><style>@page{size:A4 landscape;margin:7mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0}h1{text-align:center;font-size:15px;margin:0 0 3px}h2{text-align:center;font-size:12px;margin:0 0 5px}p{font-size:9px;text-align:center;margin:0 0 8px}.page{page-break-after:always;break-after:page}.page:last-child{page-break-after:auto;break-after:auto}table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:6.5px}th,td{border:1px solid #555;padding:3px 1px;text-align:center;overflow-wrap:anywhere}th{background:#e8f2ec}th:nth-child(3),td.name{text-align:left;width:30mm}th:nth-child(2){width:18mm}th:nth-child(1){width:7mm}th:nth-child(4){width:13mm}.legend{margin-top:6px;font-size:8px;color:#444}@media screen{body{padding:14px}.page{margin:0 auto 18px;padding:10px;max-width:1100px;border:1px solid #ddd}}@media print{.page{padding:0}}</style></head><body>${pages}<script>window.onload=function(){window.print()}</script></body></html>`);
+    reportWindow.document.close();
   };
 
   const exportAttendance = async (mode: "excel" | "pdf") => {
@@ -3059,72 +3145,135 @@ export default function Home() {
       return;
     }
 
+    // Buka tab langsung dari klik tombol agar tidak dianggap popup otomatis.
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      alert("Tab PDF diblokir browser. Izinkan pop-up untuk situs portal sekolah, lalu coba lagi.");
+      return;
+    }
+    printWindow.document.write("<!doctype html><html><head><meta charset='UTF-8'><title>Menyiapkan PDF</title></head><body style='font-family:Arial;padding:24px'>Menyiapkan laporan absensi harian...</body></html>");
+    printWindow.document.close();
+
     try {
-      const jakartaToday = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
-      const [year, month] = jakartaToday.split("-").map(Number);
+      const jakartaParts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit"
+      }).formatToParts(new Date());
+      const part = (type: string) => jakartaParts.find((item) => item.type === type)?.value ?? "";
+      const currentJakartaDate = `${part("year")}-${part("month")}-${part("day")}`;
+      const reportDate = selectedPdfAttendanceDate || currentJakartaDate;
+      if (reportDate > currentJakartaDate) throw new Error("Tanggal laporan tidak boleh melewati hari ini.");
+      const [year, month] = reportDate.split("-").map(Number);
       const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
-      const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+      const reportDateLabel = new Date(`${reportDate}T12:00:00+07:00`).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
       const [{ data: profiles, error: profileError }, { data: attendanceData, error: attendanceError }] = await Promise.all([
         supabase.from("profiles").select("id, nama, role").in("role", ["guru", "admin", "kepala_sekolah"]),
-        supabase
-          .from("teacher_attendance")
-          .select("id, guru_id, tanggal, jam_masuk, jam_pulang, latitude_masuk, longitude_masuk, alamat_masuk, latitude_pulang, longitude_pulang, alamat_pulang")
-          .gte("tanggal", monthStart)
-          .lte("tanggal", jakartaToday)
-          .order("tanggal", { ascending: true }),
+        supabase.from("teacher_attendance")
+          .select("id, guru_id, tanggal, jam_masuk, jam_pulang, latitude_masuk, longitude_masuk, alamat_masuk")
+          .gte("tanggal", monthStart).lte("tanggal", reportDate).order("tanggal", { ascending: true }),
       ]);
-
       if (profileError) throw profileError;
       if (attendanceError) throw attendanceError;
 
       const workDates: string[] = [];
-      for (let date = new Date(`${monthStart}T12:00:00+07:00`); date <= new Date(`${jakartaToday}T12:00:00+07:00`); date.setDate(date.getDate() + 1)) {
-        const day = date.getDay();
-        if (day !== 0 && day !== 6) {
-          workDates.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`);
+      for (let d = new Date(`${monthStart}T12:00:00+07:00`); d <= new Date(`${reportDate}T12:00:00+07:00`); d.setDate(d.getDate() + 1)) {
+        const weekday = d.getDay();
+        if (weekday !== 0 && weekday !== 6) {
+          workDates.push(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(d));
         }
       }
 
       const roleLabels: Record<string, string> = { guru: "Guru", admin: "Admin", kepala_sekolah: "Kepala Sekolah" };
-      const reportRows = (profiles ?? []).map((profile: any, index: number) => {
-        const roleValue = String(profile.role ?? "").toLowerCase();
-        const records = (attendanceData ?? []).filter((item: any) => item.guru_id === profile.id && item.tanggal >= monthStart && item.tanggal <= jakartaToday);
+      const esc = (value: unknown) => String(value ?? "—").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+      const sortedProfiles = [...(profiles ?? [])].sort((a: any, b: any) => {
+        const order: Record<string, number> = { kepala_sekolah: 0, admin: 1, guru: 2 };
+        return (order[String(a.role).toLowerCase()] ?? 3) - (order[String(b.role).toLowerCase()] ?? 3) || String(a.nama ?? "").localeCompare(String(b.nama ?? ""), "id");
+      });
+      const rows = sortedProfiles.map((profile: any, index: number) => {
+        const records = (attendanceData ?? []).filter((item: any) => item.guru_id === profile.id);
+        const todayRecord = records.find((item: any) => item.tanggal === reportDate);
         const presentDates = new Set(records.filter((item: any) => Boolean(item.jam_masuk) && workDates.includes(item.tanggal)).map((item: any) => item.tanggal));
-        const lateCount = records.filter((item: any) => {
-          if (!item.jam_masuk || !workDates.includes(item.tanggal)) return false;
-          const time = new Date(item.jam_masuk).toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false });
-          return time > "06:30";
-        }).length;
-        const hasGps = records.some((item: any) =>
-          item.latitude_masuk != null || item.longitude_masuk != null ||
-          item.latitude_pulang != null || item.longitude_pulang != null ||
-          item.alamat_masuk || item.alamat_pulang
-        );
-        const isAdmin = roleValue === "admin";
-        const percentage = !isAdmin && workDates.length ? Math.round((presentDates.size / workDates.length) * 100) : null;
-        return [
-          index + 1,
-          String(profile.nama ?? "Nama belum diatur"),
-          roleLabels[roleValue] ?? String(profile.role ?? "Pegawai"),
-          "—", // NIP tidak ditambahkan ke query karena keberadaan kolomnya belum dikonfirmasi.
-          `${presentDates.size}/${workDates.length} hari`,
-          isAdmin ? "— (tidak wajib)" : `${lateCount} 🔴`,
-          percentage == null ? "—" : `${percentage}%`,
-          hasGps ? "GPS tercatat" : "Belum ada data GPS",
-        ];
-      }).sort((a: any, b: any) => {
-        const order: Record<string, number> = { "Kepala Sekolah": 0, Admin: 1, Guru: 2 };
-        return (order[String(a[2])] ?? 3) - (order[String(b[2])] ?? 3) || String(a[1]).localeCompare(String(b[1]), "id");
-      }).map((row: any, index: number) => [index + 1, ...row.slice(1)]);
+        const percentage = workDates.length ? Math.round((presentDates.size / workDates.length) * 100) : 0;
+        let status = "Tidak hadir";
+        let statusClass = "absent";
+        if (todayRecord?.jam_masuk) {
+          const time = new Date(todayRecord.jam_masuk).toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false });
+          if (time <= "06:30") { status = "Hadir · Tepat waktu"; statusClass = "ontime"; }
+          else { status = "Hadir · Terlambat"; statusClass = "late"; }
+        }
+        return `<tr><td class="center">${index + 1}</td><td>${esc(profile.nama ?? "Nama belum diatur")}</td><td>${esc(roleLabels[String(profile.role ?? "").toLowerCase()] ?? profile.role ?? "Pegawai")}</td><td class="center">${todayRecord?.jam_masuk ? esc(new Date(todayRecord.jam_masuk).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false })) : "—"}</td><td class="status ${statusClass}">${status}</td><td class="center">${todayRecord?.jam_pulang ? esc(new Date(todayRecord.jam_pulang).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false })) : "—"}</td><td class="center">${percentage}%</td><td>${todayRecord?.alamat_masuk || todayRecord?.latitude_masuk != null || todayRecord?.longitude_masuk != null ? "GPS tercatat" : "Belum ada data GPS"}</td></tr>`;
+      }).join("");
 
-      printTablePdf(
-        `Laporan Rekap Bulanan Absensi Pegawai — ${monthLabel}`,
-        ["No.", "Nama Pegawai", "Jabatan", "NIP", "Hadir", "Terlambat", "Persentase", "Lokasi"],
-        reportRows
-      );
+      const title = `Laporan Absensi Harian Pegawai — ${reportDateLabel}`;
+      printWindow.document.open();
+      printWindow.document.write(`<!doctype html><html><head><meta charset="UTF-8"><title>${esc(title)}</title><style>
+        @page{size:A4 landscape;margin:9mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:10px}h1{font-size:19px;margin:0 0 5px}h2{font-size:13px;margin:0 0 5px}p{margin:3px 0 12px;color:#444;font-size:10px}.meta{display:flex;justify-content:space-between;gap:12px;margin-bottom:10px}.legend{font-size:9px;color:#444;margin-top:9px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #cbd5e1;padding:6px 5px;text-align:left;overflow-wrap:anywhere}th{background:#e2e8f0;font-size:9px}td{font-size:9px}.center{text-align:center}.status{font-weight:bold;text-align:center}.ontime{color:#166534;background:#dcfce7}.late{color:#991b1b;background:#fee2e2}.absent{color:#475569;background:#f1f5f9}tr{break-inside:avoid}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+      </style></head><body><h1>${esc(schoolSettings.namaSekolah || "SD Islam Al-Barkah")}</h1><h2>Rekap Absensi Pegawai Harian</h2><div class="meta"><p>Tanggal laporan: <b>${esc(reportDateLabel)}</b><br>Batas tepat waktu: <b>06.30 WIB</b> (pukul 06.30 tepat masih tepat waktu)</p><p>Persentase = hari hadir bulan berjalan ÷ hari kerja Senin–Jumat sampai tanggal laporan.</p></div><table><thead><tr><th style="width:4%">No.</th><th style="width:19%">Nama Pegawai</th><th style="width:13%">Jabatan</th><th style="width:9%">Jam Masuk</th><th style="width:17%">Hadir / Status</th><th style="width:9%">Jam Pulang</th><th style="width:8%">Persentase</th><th style="width:21%">Lokasi</th></tr></thead><tbody>${rows}</tbody></table><div class="legend">Hijau: hadir tepat waktu · Merah: hadir terlambat · Abu-abu: tidak hadir. Status yang sama berlaku untuk admin, kepala sekolah, dan guru.</div><script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250)};</script></body></html>`);
+      printWindow.document.close();
     } catch (error) {
+      printWindow.document.body.innerHTML = `<p style="font-family:Arial;color:#b91c1c;padding:24px">Gagal membuat laporan PDF: ${String(error instanceof Error ? error.message : "Terjadi kesalahan.")}</p>`;
       alert(`Gagal membuat laporan PDF: ${error instanceof Error ? error.message : "Terjadi kesalahan."}`);
+    }
+  };
+
+
+  const exportTeacherAttendanceMonthlySummaryPdf = async () => {
+    if (role !== "Admin" || !currentUserId) {
+      alert("Laporan PDF absensi pegawai hanya dapat diakses admin.");
+      return;
+    }
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      alert("Tab PDF diblokir browser. Izinkan pop-up untuk situs portal sekolah, lalu coba lagi.");
+      return;
+    }
+    printWindow.document.write("<!doctype html><html><head><meta charset='UTF-8'><title>Menyiapkan PDF bulanan</title></head><body style='font-family:Arial;padding:24px'>Menyiapkan rekap absensi bulanan...</body></html>");
+    printWindow.document.close();
+    try {
+      const jakartaParts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+      const part = (type: string) => jakartaParts.find((item) => item.type === type)?.value ?? "";
+      const today = `${part("year")}-${part("month")}-${part("day")}`;
+      const [year, month] = (selectedPdfAttendanceMonth || today.slice(0, 7)).split("-").map(Number);
+      const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+      const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      const monthEnd = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+      const reportEndDate = monthStart.slice(0, 7) === today.slice(0, 7) ? today : (monthEnd > today ? today : monthEnd);
+      if (monthStart > today) throw new Error("Pilih bulan yang tidak melewati bulan berjalan.");
+      const monthLabel = new Date(`${monthStart}T12:00:00+07:00`).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", month: "long", year: "numeric" });
+      const [{ data: profiles, error: profileError }, { data: attendanceData, error: attendanceError }] = await Promise.all([
+        supabase.from("profiles").select("id, nama, role").in("role", ["guru", "admin", "kepala_sekolah"]),
+        supabase.from("teacher_attendance").select("id, guru_id, tanggal, jam_masuk, jam_pulang").gte("tanggal", monthStart).lte("tanggal", reportEndDate).order("tanggal", { ascending: true }),
+      ]);
+      if (profileError) throw profileError;
+      if (attendanceError) throw attendanceError;
+      const workDates: string[] = [];
+      for (let d = new Date(`${monthStart}T12:00:00+07:00`); d <= new Date(`${reportEndDate}T12:00:00+07:00`); d.setDate(d.getDate() + 1)) {
+        const weekday = d.getDay();
+        if (weekday !== 0 && weekday !== 6) workDates.push(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(d));
+      }
+      const roleLabels: Record<string, string> = { guru: "Guru", admin: "Admin", kepala_sekolah: "Kepala Sekolah" };
+      const esc = (value: unknown) => String(value ?? "—").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+      const sortedProfiles = [...(profiles ?? [])].sort((a: any, b: any) => {
+        const order: Record<string, number> = { kepala_sekolah: 0, admin: 1, guru: 2 };
+        return (order[String(a.role).toLowerCase()] ?? 3) - (order[String(b.role).toLowerCase()] ?? 3) || String(a.nama ?? "").localeCompare(String(b.nama ?? ""), "id");
+      });
+      const rows = sortedProfiles.map((profile: any, index: number) => {
+        const records = (attendanceData ?? []).filter((item: any) => item.guru_id === profile.id && Boolean(item.jam_masuk) && workDates.includes(item.tanggal));
+        const presentDates = new Set(records.map((item: any) => item.tanggal));
+        const onTime = records.filter((item: any) => new Date(item.jam_masuk).toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }) <= "06:30").length;
+        const late = records.length - onTime;
+        const absent = Math.max(0, workDates.length - presentDates.size);
+        const percentage = workDates.length ? Math.round((presentDates.size / workDates.length) * 100) : 0;
+        return `<tr><td class="center">${index + 1}</td><td>${esc(profile.nama ?? "Nama belum diatur")}</td><td>${esc(roleLabels[String(profile.role ?? "").toLowerCase()] ?? profile.role ?? "Pegawai")}</td><td class="center">${presentDates.size}</td><td class="center ontime">${onTime}</td><td class="center late">${late}</td><td class="center absent">${absent}</td><td class="center"><b>${percentage}%</b></td></tr>`;
+      }).join("");
+      const title = `Rekap Absensi Pegawai Bulanan — ${monthLabel}`;
+      printWindow.document.open();
+      printWindow.document.write(`<!doctype html><html><head><meta charset="UTF-8"><title>${esc(title)}</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:10px}h1{font-size:19px;margin:0 0 5px}h2{font-size:14px;margin:0 0 6px}p{margin:4px 0 12px;color:#444;font-size:10px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #cbd5e1;padding:7px 6px;text-align:left}th{background:#e2e8f0;font-size:10px}td{font-size:10px}.center{text-align:center}.ontime{color:#166534;background:#dcfce7}.late{color:#991b1b;background:#fee2e2}.absent{color:#475569;background:#f1f5f9}.note{margin-top:10px;font-size:9px;color:#475569}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><h1>${esc(schoolSettings.namaSekolah || "SD Islam Al-Barkah")}</h1><h2>Rekap Absensi Pegawai Bulanan</h2><p>Bulan laporan: <b>${esc(monthLabel)}</b> · Hari kerja Senin–Jumat sampai tanggal ${esc(new Date(`${reportEndDate}T12:00:00+07:00`).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" }))}. Batas tepat waktu: 06.30 WIB.</p><table><thead><tr><th style="width:5%">No.</th><th style="width:24%">Nama Pegawai</th><th style="width:18%">Jabatan</th><th style="width:10%">Hari Hadir</th><th style="width:12%">Tepat Waktu</th><th style="width:12%">Terlambat</th><th style="width:10%">Tidak Hadir</th><th style="width:9%">Persentase</th></tr></thead><tbody>${rows}</tbody></table><div class="note">Hijau: tepat waktu (pukul 06.30 WIB atau sebelumnya). Merah: terlambat (setelah 06.30 WIB). Abu-abu: tidak hadir. Persentase = hari hadir ÷ hari kerja pada periode laporan. Rekap otomatis dihitung dari data absensi yang tersimpan.</div><script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250)};</script></body></html>`);
+      printWindow.document.close();
+    } catch (error) {
+      const message = String(error instanceof Error ? error.message : "Terjadi kesalahan.");
+      printWindow.document.body.innerHTML = `<p style="font-family:Arial;color:#b91c1c;padding:24px">Gagal membuat laporan PDF: ${message.replace(/</g, "&lt;")}</p>`;
+      alert(`Gagal membuat laporan PDF: ${message}`);
     }
   };
 
@@ -6866,7 +7015,8 @@ export default function Home() {
                 <div><p className="text-sm font-bold text-blue-900">Export absensi</p><p className="text-xs text-blue-700">Rekap seluruh absensi yang boleh dilihat akun ini.</p></div>
                 <div className="flex gap-2">
                   <button type="button" onClick={() => exportAttendance("excel")} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100">📊 Excel</button>
-                  <button type="button" onClick={() => exportAttendance("pdf")} className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700">📄 PDF</button>
+                  <button type="button" onClick={() => exportAttendance("pdf")} className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700">📄 PDF Rekap Harian</button>
+                  {(role === "Admin" || isWaliKelas) && <button type="button" onClick={() => void exportStudentAttendanceBySubjectMonthlyPdf()} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700">📄 PDF Rekap Bulanan per Mapel</button>}
                 </div>
               </div>
               {(role === "Admin" || role === "Guru" || role === "Kepala Sekolah") && (
@@ -7002,10 +7152,15 @@ export default function Home() {
                         <div>
                           <p className="text-sm font-semibold text-violet-700">Rekap Absensi Guru</p>
                           <h3 className="mt-1 text-lg font-bold text-gray-900">Kehadiran Seluruh Guru</h3>
-                          <p className="mt-1 text-sm text-gray-600">Hari kerja Senin–Jumat. Batas masuk tepat waktu pukul 06.30 WIB. Cetak PDF rekap bulanan tersedia untuk admin.</p>
+                          <p className="mt-1 text-sm text-gray-600">Hari kerja Senin–Jumat. Batas masuk tepat waktu pukul 06.30 WIB. PDF harian untuk detail tanggal tertentu dan PDF bulanan untuk ringkasan otomatis seluruh pegawai.</p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
-                           {role === "Admin" && <button type="button" onClick={() => void exportTeacherAttendanceMonthlyPdf()} className="rounded-xl bg-violet-600 px-3 py-2 text-sm font-bold text-white hover:bg-violet-700">Cetak / Simpan PDF Bulanan</button>}
+                           {role === "Admin" && <div className="flex flex-wrap items-end gap-3">
+                             <label className="flex flex-col gap-1 text-xs font-semibold text-gray-600">Tanggal laporan harian<input type="date" value={selectedPdfAttendanceDate} max={todayDateString} onChange={(e) => setSelectedPdfAttendanceDate(e.target.value)} className="rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm text-gray-800" /></label>
+                             <button type="button" onClick={() => void exportTeacherAttendanceMonthlyPdf()} className="rounded-xl bg-violet-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-violet-700">📄 PDF Harian</button>
+                             <label className="flex flex-col gap-1 text-xs font-semibold text-gray-600">Bulan laporan bulanan<input type="month" value={selectedPdfAttendanceMonth} max={todayDateString.slice(0, 7)} onChange={(e) => setSelectedPdfAttendanceMonth(e.target.value)} className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm text-gray-800" /></label>
+                             <button type="button" onClick={() => void exportTeacherAttendanceMonthlySummaryPdf()} className="rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-indigo-700">📊 PDF Bulanan</button>
+                           </div>}
                            <button type="button" onClick={() => setAttendancePanel("menu")} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-gray-600 hover:bg-slate-50">← Kembali</button>
                          </div>
                       </div>
