@@ -111,10 +111,10 @@ function EmployeeQrScanner({ onScan }: { onScan: (token: string) => void }) {
       <style>{`
         /* Area kamera portrait seperti kartu; jangan menumpuk canvas di atas video
            karena dapat menutupi preview dan mengganggu area deteksi html5-qrcode. */
-        .employee-qr-camera { position: relative; width: 250px; aspect-ratio: 3 / 4; max-width: 100%; margin: 0 auto; overflow: hidden; border-radius: 16px; background: #0f172a; isolation: isolate; }
-        .employee-qr-camera > div { width: 100% !important; height: 100% !important; min-height: 0 !important; border: 0 !important; overflow: hidden !important; }
-        .employee-qr-camera [id$="__scan_region"] { width: 100% !important; min-height: 0 !important; border: 0 !important; overflow: hidden !important; }
-        .employee-qr-camera video { display: block !important; width: 100% !important; max-width: 100% !important; object-fit: cover !important; border-radius: 16px !important; }
+        .employee-qr-camera { position: relative; width: min(100%, 300px); aspect-ratio: 3 / 4; max-width: 100%; margin: 0 auto; overflow: hidden; border-radius: 16px; background: #111827; isolation: isolate; }
+        .employee-qr-camera > div[id^="employee-qr-reader"] { position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; min-height: 0 !important; border: 0 !important; overflow: hidden !important; }
+        .employee-qr-camera [id$="__scan_region"] { position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; min-height: 0 !important; border: 0 !important; overflow: hidden !important; }
+        .employee-qr-camera [id$="__scan_region"] video, .employee-qr-camera video { position: absolute !important; inset: 0 !important; display: block !important; width: 100% !important; height: 100% !important; max-width: none !important; object-fit: cover !important; border-radius: 16px !important; }
         .employee-qr-camera canvas { max-width: 100% !important; }
         .employee-qr-camera [id$="__scan_region"] img, .employee-qr-camera [id$="__dashboard"] { display: none !important; }
         .employee-qr-scan-frame { position:absolute; z-index:20; inset:12%; border:2px solid rgba(45,212,191,.95); border-radius:18px; pointer-events:none; box-shadow:0 0 0 999px rgba(2,6,23,.12),0 0 22px rgba(45,212,191,.3); }
@@ -1084,6 +1084,15 @@ export default function Home() {
 
   const [attendanceSubjectId, setAttendanceSubjectId] = useState<string>("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [activityRows, setActivityRows] = useState<Array<{
+    id: number;
+    table_name: string;
+    action: string;
+    actor_id: string | null;
+    actor_name: string | null;
+    target_name: string | null;
+    created_at: string;
+  }>>([]);
   const [isWaliKelas, setIsWaliKelas] = useState(false);
   const [isGuruPiket, setIsGuruPiket] = useState(false);
   const canEditGrades = role === "Admin" || role === "Guru";
@@ -3312,7 +3321,49 @@ export default function Home() {
       const esc = (value: unknown) => String(value ?? "—").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
       const sortedProfiles = [...(profiles ?? [])].sort((a: any, b: any) => {
         const order: Record<string, number> = { kepala_sekolah: 0, admin: 1, guru: 2 };
-        return (order[String(a.role).toLowerCase()] ?? 3) - (order[String(b.role).toLowerCase()] ?? 3) || String(a.nama ?? "").localeCompare(String(b.nama ?? ""), "id");
+        useEffect(() => {
+    if (!loggedIn || !currentUserId) {
+      setActivityRows([]);
+      return;
+    }
+
+    let active = true;
+    const loadActivities = async () => {
+      const { data, error } = await supabase
+        .from("activity_logs")
+        .select("id, table_name, action, actor_id, actor_name, target_name, created_at")
+        .order("created_at", { ascending: false })
+        .limit(8);
+
+      if (!active) return;
+      if (error) {
+        console.error("Gagal memuat aktivitas terbaru:", error.message);
+        return;
+      }
+      setActivityRows((data ?? []) as typeof activityRows);
+    };
+
+    void loadActivities();
+    const channel = supabase
+      .channel("school-activity-feed")
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "activity_logs",
+      }, () => { void loadActivities(); })
+      .subscribe();
+
+    const refreshOnFocus = () => { void loadActivities(); };
+    window.addEventListener("focus", refreshOnFocus);
+
+    return () => {
+      active = false;
+      window.removeEventListener("focus", refreshOnFocus);
+      void supabase.removeChannel(channel);
+    };
+  }, [loggedIn, currentUserId]);
+
+  return (order[String(a.role).toLowerCase()] ?? 3) - (order[String(b.role).toLowerCase()] ?? 3) || String(a.nama ?? "").localeCompare(String(b.nama ?? ""), "id");
       });
       const rows = sortedProfiles.map((profile: any, index: number) => {
         const records = (attendanceData ?? []).filter((item: any) => item.guru_id === profile.id);
@@ -5474,10 +5525,19 @@ export default function Home() {
                     <div className="rounded-2xl border bg-white p-6">
                       <h3 className="font-bold">Aktivitas Terbaru</h3>
                       <div className="mt-4 space-y-4">
-                        <Activity title="Absensi guru diperbarui" time="08:15" />
-                        <Activity title="Data siswa diperbarui" time="09:02" />
-                        <Activity title="Jadwal pelajaran diperbarui" time="10:30" />
-                        <Activity title="Nilai kelas 6A diperbarui" time="11:20" />
+                        {activityRows.length === 0 ? (
+                          <p className="text-sm text-gray-500">Belum ada aktivitas tercatat.</p>
+                        ) : activityRows.map((item) => (
+                          <Activity
+                            key={item.id}
+                            title={`${item.actor_name || "Pengguna"} ${item.action}${item.target_name ? ` — ${item.target_name}` : ""}`}
+                            time={new Date(item.created_at).toLocaleTimeString("id-ID", {
+                              timeZone: "Asia/Jakarta",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          />
+                        ))}
                       </div>
                     </div>
                   </div>
