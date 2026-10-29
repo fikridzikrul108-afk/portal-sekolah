@@ -62,8 +62,8 @@ function EmployeeQrScanner({ onScan }: { onScan: (token: string) => void }) {
             fps: 10,
             // Gunakan kotak deteksi QR yang cukup besar di tengah area kamera portrait.
             qrbox: (width: number, height: number) => {
-              const side = Math.floor(Math.min(width * 0.82, height * 0.62, 280));
-              const safeSide = Math.max(160, side);
+              const side = Math.floor(Math.min(width * 0.72, height * 0.48, 240));
+              const safeSide = Math.max(120, side);
               return { width: safeSide, height: safeSide };
             },
             aspectRatio: 3 / 4,
@@ -111,12 +111,18 @@ function EmployeeQrScanner({ onScan }: { onScan: (token: string) => void }) {
       <style>{`
         /* Area kamera portrait seperti kartu; jangan menumpuk canvas di atas video
            karena dapat menutupi preview dan mengganggu area deteksi html5-qrcode. */
-        .employee-qr-camera { position: relative; width: 320px; aspect-ratio: 3 / 4; max-width: 100%; margin: 0 auto; overflow: hidden; border-radius: 16px; background: #0f172a; }
+        .employee-qr-camera { position: relative; width: 250px; aspect-ratio: 3 / 4; max-width: 100%; margin: 0 auto; overflow: hidden; border-radius: 16px; background: #0f172a; isolation: isolate; }
         .employee-qr-camera > div { width: 100% !important; height: 100% !important; min-height: 0 !important; border: 0 !important; overflow: hidden !important; }
         .employee-qr-camera [id$="__scan_region"] { width: 100% !important; min-height: 0 !important; border: 0 !important; overflow: hidden !important; }
         .employee-qr-camera video { display: block !important; width: 100% !important; max-width: 100% !important; object-fit: cover !important; border-radius: 16px !important; }
         .employee-qr-camera canvas { max-width: 100% !important; }
         .employee-qr-camera [id$="__scan_region"] img, .employee-qr-camera [id$="__dashboard"] { display: none !important; }
+        .employee-qr-scan-frame { position:absolute; z-index:20; inset:12%; border:2px solid rgba(45,212,191,.95); border-radius:18px; pointer-events:none; box-shadow:0 0 0 999px rgba(2,6,23,.12),0 0 22px rgba(45,212,191,.3); }
+        .employee-qr-scan-line { position:absolute; z-index:21; left:4%; right:4%; height:3px; top:8%; border-radius:999px; background:#5eead4; box-shadow:0 0 12px 3px rgba(45,212,191,.7); animation:employee-qr-scan 2.2s ease-in-out infinite alternate; }
+        .employee-qr-scan-frame:after { content:""; position:absolute; inset:0; border-radius:16px; background:linear-gradient(180deg,transparent,rgba(45,212,191,.10),transparent); animation:employee-qr-pulse 2s ease-in-out infinite; }
+        @keyframes employee-qr-scan { from{top:8%} to{top:90%} }
+        @keyframes employee-qr-pulse { 0%,100%{opacity:.2} 50%{opacity:.8} }
+        @media (prefers-reduced-motion: reduce) { .employee-qr-scan-line,.employee-qr-scan-frame:after { animation:none; } }
       `}</style>
       <div className="mb-3 text-center">
         <p className="text-sm font-semibold text-slate-800">
@@ -128,6 +134,8 @@ function EmployeeQrScanner({ onScan }: { onScan: (token: string) => void }) {
       </div>
       <div className="employee-qr-camera">
         <div id={readerId} />
+        {scanState !== "success" && <div className="employee-qr-scan-frame" aria-hidden="true"><div className="employee-qr-scan-line" /></div>}
+        {scanState === "success" && <div className="absolute inset-0 flex items-center justify-center bg-emerald-950/60 text-white"><div className="rounded-2xl border border-emerald-200/70 bg-emerald-900/80 px-5 py-4 text-center shadow-xl"><div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-400 text-2xl font-black text-emerald-950">✓</div><p className="font-bold">QR berhasil dibaca</p><p className="mt-1 text-xs">Memverifikasi identitas…</p></div></div>}
       </div>
       {cameraError && (
         <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -161,9 +169,10 @@ function downloadEmployeeQr(profileId: string, employeeName: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
-// Koordinat sementara lokasi sekolah lama (sumber data pendidikan resmi).
-// Verifikasi di lokasi sebelum dipakai; setelah sekolah pindah, ubah koordinat ini.
-const SCHOOL_LOCATION = { latitude: -7.0547, longitude: 107.5678, radiusMeters: 100 };
+// Titik pusat GPS sekolah. Radius absensi tetap 100 meter.
+const SCHOOL_LOCATION = { latitude: -7.064855, longitude: 107.568025, radiusMeters: 100 };
+// GPS dan validasi radius absensi aktif.
+const ATTENDANCE_GPS_TEST_MODE = false;
 
 type Role = "Admin" | "Kepala Sekolah" | "Guru" | "Siswa" | "Orang Tua";
 
@@ -789,6 +798,89 @@ const emptySchoolSettings: SchoolSettings = {
   namaKepalaSekolah: "", nipKepalaSekolah: "", tahunAjaran: "2026/2027", semester: "1", logoUrl: SCHOOL_LOGO_URL,
 };
 
+
+type AttendanceCardResult = {
+  profile_id: string;
+  qr_token: string;
+  nama: string;
+  role: string;
+  foto_url: string | null;
+  mode: string;
+  time: string;
+  date: string;
+  address: string;
+  latitude: number | null;
+  longitude: number | null;
+  status: string;
+};
+
+function AttendanceIdCard({
+  result,
+  schoolName,
+  onClose,
+}: {
+  result: AttendanceCardResult;
+  schoolName: string;
+  onClose: () => void;
+}) {
+  const roleLabel = result.role.replace(/_/g, " ");
+  return (
+    <div className="attendance-card-backdrop" role="dialog" aria-modal="true" aria-label="Kartu bukti absensi">
+      <style>{`
+        .attendance-card-backdrop { position:fixed; z-index:9999; inset:0; display:flex; align-items:center; justify-content:center; padding:16px; overflow-y:auto; background:rgba(15,23,42,.58); backdrop-filter:blur(5px); animation:attendance-backdrop-in .18s ease-out both; }
+        .attendance-id-card { position:relative; isolation:isolate; width:min(100%,340px); max-height:calc(100dvh - 32px); overflow-y:auto; border:1px solid #dbe5f4; border-radius:22px; background-color:#fbfbfc; background-image:repeating-radial-gradient(ellipse at 15% 12%, transparent 0 18px, rgba(148,163,184,.14) 19px 20px, transparent 21px 34px), repeating-radial-gradient(ellipse at 90% 40%, transparent 0 24px, rgba(148,163,184,.10) 25px 26px, transparent 27px 43px); box-shadow:0 24px 70px rgba(2,6,23,.3); animation:attendance-card-pop .28s cubic-bezier(.2,.8,.2,1) both; }
+        .attendance-id-card .id-blue-ribbon { position:absolute; z-index:-1; width:86px; height:205px; top:-82px; right:-10px; border-radius:0 0 60px 60px; background:#1d5eea; transform:rotate(-12deg); }
+        .attendance-id-card .id-blue-swoosh { position:absolute; z-index:-1; width:260px; height:75px; left:-112px; top:148px; border-radius:50%; background:#1d5eea; transform:rotate(-14deg); }
+        @keyframes attendance-backdrop-in { from{opacity:0} to{opacity:1} }
+        @keyframes attendance-card-pop { from{opacity:0;transform:translateY(12px) scale(.96)} to{opacity:1;transform:translateY(0) scale(1)} }
+        @media (max-width:480px) { .attendance-card-backdrop { padding:10px; } .attendance-id-card { width:min(100%,320px); max-height:calc(100dvh - 20px); } }
+        @media (prefers-reduced-motion:reduce) { .attendance-card-backdrop,.attendance-id-card { animation:none; } }
+        @media print { body * { visibility:hidden !important; } .attendance-card-backdrop { position:static !important; display:block !important; padding:0 !important; background:white !important; backdrop-filter:none !important; } .attendance-id-card,.attendance-id-card * { visibility:visible !important; } .attendance-id-card { position:fixed !important; inset:8mm auto auto 50% !important; transform:translateX(-50%) !important; width:85mm !important; max-width:none !important; max-height:none !important; overflow:visible !important; box-shadow:none !important; print-color-adjust:exact; -webkit-print-color-adjust:exact; } .attendance-id-card .id-card-actions { display:none !important; } }
+      `}</style>
+      <div className="attendance-id-card">
+        <div className="id-blue-ribbon" aria-hidden="true" />
+        <div className="id-blue-swoosh" aria-hidden="true" />
+        <div className="relative px-4 pb-3 pt-3">
+          <div className="flex items-center justify-center border-b border-blue-100/80 pb-2 text-center">
+            <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-blue-700">Bukti Absensi Digital</p>
+          </div>
+
+          <div className="relative mx-auto mt-4 flex h-24 w-24 items-center justify-center rounded-full border-[3px] border-blue-600 bg-slate-950 p-0.5 shadow-md">
+            {result.foto_url ? (
+              <img src={result.foto_url} alt={`Foto profil ${result.nama}`} className="h-full w-full rounded-full object-cover" onError={(event) => { event.currentTarget.style.display = "none"; }} />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center rounded-full bg-slate-950 text-center text-xs font-semibold text-white">
+                <svg viewBox="0 0 80 80" className="h-16 w-16" role="img" aria-label="Ilustrasi foto profil"><circle cx="40" cy="28" r="14" fill="#f0c7a4"/><path d="M25 27c0-13 7-19 16-19 11 0 17 8 15 21l-5-9-8-4-12 5-6 6Z" fill="#334155"/><path d="M15 80c1-19 11-29 25-29s24 10 25 29" fill="#1d5eea"/><path d="M31 48h18l-3 9-6 6-6-6Z" fill="#f0c7a4"/></svg>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-3 min-h-[48px] text-center">
+            <h3 className="break-words text-lg font-black leading-tight text-slate-950">{result.nama}</h3>
+            <p className="mt-0.5 text-sm font-bold capitalize text-slate-800">{roleLabel}</p>
+            <p className="mt-0.5 text-[10px] text-slate-600">{result.date}</p>
+          </div>
+
+          <div className="mx-auto mt-3 flex h-[94px] w-[94px] items-center justify-center rounded-xl border-2 border-slate-900 bg-white p-1.5">
+            {result.qr_token ? <QRCodeSVG value={result.qr_token} size={78} level="M" includeMargin /> : <span className="text-[10px] text-slate-400">QR tidak tersedia</span>}
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 rounded-xl border border-slate-200 bg-white/95 p-3">
+            <div><p className="text-[8px] font-bold uppercase tracking-wide text-blue-700">Jenis absensi</p><p className="mt-0.5 text-xs font-extrabold text-slate-950">{result.mode === "masuk" ? "Absen Masuk" : "Absen Pulang"}</p></div>
+            <div className="text-right"><p className="text-[8px] font-bold uppercase tracking-wide text-blue-700">Waktu (WIB)</p><p className="mt-0.5 text-base font-black text-slate-950">{result.time}</p></div>
+            <div className="col-span-2 border-t border-slate-100 pt-2"><p className="text-[8px] font-bold uppercase tracking-wide text-blue-700">Informasi GPS / Lokasi</p><p className="mt-0.5 break-words text-[10px] leading-relaxed text-slate-700">{result.address}</p>{result.latitude != null && result.longitude != null && <p className="mt-0.5 text-[9px] text-slate-500">Koordinat: {result.latitude.toFixed(6)}, {result.longitude.toFixed(6)}</p>}</div>
+            <div className="col-span-2 flex items-center justify-between border-t border-slate-100 pt-2"><span className="text-[8px] font-bold uppercase tracking-wide text-blue-700">Status</span><span className={`text-[10px] font-extrabold ${result.status === "Terlambat" ? "text-red-700" : "text-emerald-700"}`}>{result.status}</span></div>
+          </div>
+        </div>
+        <div className="h-2.5 bg-blue-600" />
+        <div className="id-card-actions flex justify-center p-2.5">
+          <button type="button" onClick={onClose} className="rounded-xl bg-slate-950 px-5 py-2 text-xs font-bold text-white transition hover:bg-slate-800">Tutup kartu</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [name, setName] = useState("");
@@ -799,6 +891,11 @@ export default function Home() {
   const [userProfile, setUserProfile] = useState<UserProfile>(emptyUserProfile);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
+  const [photoCropSrc, setPhotoCropSrc] = useState<string>("");
+  const [photoCropZoom, setPhotoCropZoom] = useState(1);
+  const [photoCropOffset, setPhotoCropOffset] = useState({ x: 0, y: 0 });
+  const [photoCropDragging, setPhotoCropDragging] = useState(false);
+  const photoCropDragStart = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
   const [navigationLoading, setNavigationLoading] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(() => typeof window !== "undefined" && window.localStorage.getItem("albarkah-theme") === "dark");
@@ -881,7 +978,7 @@ export default function Home() {
   const [scannedEmployee, setScannedEmployee] = useState<{ profile_id: string; qr_token: string; nama: string; role: string; foto_url: string | null } | null>(null);
   const [qrAttendanceMode, setQrAttendanceMode] = useState<"masuk" | "pulang">("masuk");
   const [qrAttendanceBusy, setQrAttendanceBusy] = useState(false);
-  const [qrAttendanceResult, setQrAttendanceResult] = useState<{ nama: string; mode: string; time: string; address: string; status: string } | null>(null);
+  const [qrAttendanceResult, setQrAttendanceResult] = useState<{ profile_id: string; qr_token: string; nama: string; role: string; foto_url: string | null; mode: string; time: string; date: string; address: string; latitude: number | null; longitude: number | null; status: string } | null>(null);
 
   const [teacherAttendanceReportError, setTeacherAttendanceReportError] = useState("");
   const [attendanceClassChosen, setAttendanceClassChosen] = useState(false);
@@ -1170,9 +1267,37 @@ export default function Home() {
 
     const reader = new FileReader();
     reader.onload = () => {
-      setUserProfile((current) => ({ ...current, fotoUrl: String(reader.result ?? "") }));
+      setPhotoCropSrc(String(reader.result ?? ""));
+      setPhotoCropZoom(1);
+      setPhotoCropOffset({ x: 0, y: 0 });
     };
     reader.readAsDataURL(file);
+  };
+
+  const saveCroppedProfilePhoto = () => {
+    if (!photoCropSrc) return;
+    const image = new Image();
+    image.onload = () => {
+      const outputSize = 640;
+      const baseScale = Math.max(outputSize / image.naturalWidth, outputSize / image.naturalHeight);
+      const scale = baseScale * photoCropZoom;
+      const canvas = document.createElement("canvas");
+      canvas.width = outputSize;
+      canvas.height = outputSize;
+      const context = canvas.getContext("2d");
+      if (!context) { alert("Foto belum bisa diproses. Coba pilih foto lain."); return; }
+      const drawWidth = image.naturalWidth * scale;
+      const drawHeight = image.naturalHeight * scale;
+      context.drawImage(image, (outputSize - drawWidth) / 2 + photoCropOffset.x * (outputSize / 280), (outputSize - drawHeight) / 2 + photoCropOffset.y * (outputSize / 280), drawWidth, drawHeight);
+      const croppedPhoto = canvas.toDataURL("image/jpeg", 0.88);
+      setUserProfile((current) => ({ ...current, fotoUrl: croppedPhoto }));
+      setPhotoCropSrc("");
+      setPhotoCropZoom(1);
+      setPhotoCropOffset({ x: 0, y: 0 });
+      setProfileSaved(false);
+    };
+    image.onerror = () => alert("Foto tidak dapat dibaca. Silakan pilih gambar lain.");
+    image.src = photoCropSrc;
   };
 
   const visibleMenuItems = menuItems.filter((item) => item.roles.includes(role));
@@ -3459,26 +3584,33 @@ export default function Home() {
       if (qrAttendanceMode === "masuk" && existing?.jam_masuk) throw new Error("Pegawai ini sudah tercatat absen masuk hari ini.");
       if (qrAttendanceMode === "pulang" && !existing?.jam_masuk) throw new Error("Pegawai harus absen masuk terlebih dahulu.");
       if (qrAttendanceMode === "pulang" && existing?.jam_pulang) throw new Error("Pegawai ini sudah tercatat absen pulang hari ini.");
-      if (!navigator.geolocation) throw new Error("Perangkat ini tidak mendukung GPS.");
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }));
-      const { latitude, longitude, accuracy } = position.coords;
-      if (accuracy > 100) throw new Error(`Akurasi GPS kurang baik (${Math.round(accuracy)} m). Coba aktifkan lokasi presisi.`);
-      const distance = getDistanceMeters(latitude, longitude, SCHOOL_LOCATION.latitude, SCHOOL_LOCATION.longitude);
-      if (distance > SCHOOL_LOCATION.radiusMeters) throw new Error(`Lokasi sekitar ${Math.round(distance)} m dari titik uji sekolah, melebihi batas ${SCHOOL_LOCATION.radiusMeters} m.`);
-      const address = await getApproximateAddress(latitude, longitude);
+      let latitude: number | null = null;
+      let longitude: number | null = null;
+      let address = "GPS dinonaktifkan sementara untuk uji coba";
+      if (!ATTENDANCE_GPS_TEST_MODE) {
+        if (!navigator.geolocation) throw new Error("Perangkat ini tidak mendukung GPS.");
+        const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }));
+        latitude = position.coords.latitude;
+        longitude = position.coords.longitude;
+        const accuracy = position.coords.accuracy;
+        if (accuracy > 100) throw new Error(`Akurasi GPS kurang baik (${Math.round(accuracy)} m). Coba aktifkan lokasi presisi.`);
+        const distance = getDistanceMeters(latitude, longitude, SCHOOL_LOCATION.latitude, SCHOOL_LOCATION.longitude);
+        if (distance > SCHOOL_LOCATION.radiusMeters) throw new Error(`Lokasi sekitar ${Math.round(distance)} m dari titik uji sekolah, melebihi batas ${SCHOOL_LOCATION.radiusMeters} m.`);
+        address = await getApproximateAddress(latitude, longitude);
+      }
       const timestamp = new Date().toISOString();
       const timeLabel = new Date(timestamp).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" });
       const isLate = new Date(timestamp).toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }) > "06:30";
       const statusLabel = qrAttendanceMode === "masuk" ? (isLate ? "Terlambat" : "Tepat waktu") : "Absen pulang";
       if (qrAttendanceMode === "masuk") {
-        const payload = { guru_id: scannedEmployee.profile_id, tanggal: jakartaToday, jam_masuk: timestamp, latitude_masuk: latitude, longitude_masuk: longitude, alamat_masuk: address, keterangan: statusLabel };
+        const payload = { guru_id: scannedEmployee.profile_id, tanggal: jakartaToday, jam_masuk: timestamp, ...(ATTENDANCE_GPS_TEST_MODE ? {} : { latitude_masuk: latitude, longitude_masuk: longitude, alamat_masuk: address }), keterangan: statusLabel };
         const { error: saveError } = await supabase.from("teacher_attendance").insert(payload);
         if (saveError) throw saveError;
       } else {
-        const { error: saveError } = await supabase.from("teacher_attendance").update({ jam_pulang: timestamp, updated_at: timestamp, latitude_pulang: latitude, longitude_pulang: longitude, alamat_pulang: address }).eq("id", existing?.id).is("jam_pulang", null);
+        const { error: saveError } = await supabase.from("teacher_attendance").update({ jam_pulang: timestamp, updated_at: timestamp, ...(ATTENDANCE_GPS_TEST_MODE ? {} : { latitude_pulang: latitude, longitude_pulang: longitude, alamat_pulang: address }) }).eq("id", existing?.id).is("jam_pulang", null);
         if (saveError) throw saveError;
       }
-      setQrAttendanceResult({ nama: scannedEmployee.nama, mode: qrAttendanceMode, time: timeLabel, address, status: statusLabel });
+      setQrAttendanceResult({ profile_id: scannedEmployee.profile_id, qr_token: scannedEmployee.qr_token, nama: scannedEmployee.nama, role: scannedEmployee.role, foto_url: scannedEmployee.foto_url, mode: qrAttendanceMode, time: timeLabel, date: new Date(timestamp).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", weekday: "long", day: "numeric", month: "long", year: "numeric" }), address, latitude, longitude, status: statusLabel });
       alert(`Absensi ${qrAttendanceMode} ${scannedEmployee.nama} berhasil disimpan.`);
       setScannedEmployee(null);
     } catch (error) {
@@ -3534,23 +3666,22 @@ export default function Home() {
 
     setAttendanceSaving(true);
     setLocationChecking(true);
-    setTeacherLocationStatus("Memeriksa lokasi perangkat...");
+    setTeacherLocationStatus(ATTENDANCE_GPS_TEST_MODE ? "Mode uji coba: GPS dan radius sementara dinonaktifkan." : "Memeriksa lokasi perangkat...");
     try {
-      const location = await getCurrentTeacherLocation();
-      const distance = getDistanceMeters(location.latitude, location.longitude, SCHOOL_LOCATION.latitude, SCHOOL_LOCATION.longitude);
-      if (location.accuracy > 100) {
-        throw new Error(`Akurasi GPS belum cukup (${Math.round(location.accuracy)} meter). Aktifkan lokasi presisi dan coba lagi.`);
+      let location: { latitude: number; longitude: number; accuracy: number } | null = null;
+      let address = "GPS dinonaktifkan sementara untuk uji coba";
+      if (!ATTENDANCE_GPS_TEST_MODE) {
+        location = await getCurrentTeacherLocation();
+        const distance = getDistanceMeters(location.latitude, location.longitude, SCHOOL_LOCATION.latitude, SCHOOL_LOCATION.longitude);
+        if (location.accuracy > 100) throw new Error(`Akurasi GPS belum cukup (${Math.round(location.accuracy)} meter). Aktifkan lokasi presisi dan coba lagi.`);
+        if (distance > SCHOOL_LOCATION.radiusMeters) throw new Error(`Absensi ditolak. Lokasi terdeteksi sekitar ${Math.round(distance)} meter dari titik sekolah, sedangkan batasnya ${SCHOOL_LOCATION.radiusMeters} meter.`);
+        address = await getApproximateAddress(location.latitude, location.longitude);
       }
-      if (distance > SCHOOL_LOCATION.radiusMeters) {
-        throw new Error(`Absensi ditolak. Lokasi terdeteksi sekitar ${Math.round(distance)} meter dari titik sekolah, sedangkan batasnya ${SCHOOL_LOCATION.radiusMeters} meter.`);
-      }
-
-      const address = await getApproximateAddress(location.latitude, location.longitude);
       const timestamp = new Date().toISOString();
       const isMasuk = teacherAttendanceMode === "masuk";
-      const locationFields = isMasuk
-        ? { latitude_masuk: location.latitude, longitude_masuk: location.longitude, alamat_masuk: address }
-        : { latitude_pulang: location.latitude, longitude_pulang: location.longitude, alamat_pulang: address };
+      const locationFields = ATTENDANCE_GPS_TEST_MODE ? {} : isMasuk
+        ? { latitude_masuk: location!.latitude, longitude_masuk: location!.longitude, alamat_masuk: address }
+        : { latitude_pulang: location!.latitude, longitude_pulang: location!.longitude, alamat_pulang: address };
 
       if (isMasuk) {
         const { data, error } = await supabase
@@ -3561,8 +3692,10 @@ export default function Home() {
         if (error) throw new Error(`Absen masuk gagal disimpan: ${error.message}`);
         setTeacherAttendanceToday(data);
         setTeacherAttendanceMode("pulang");
-        setTeacherLocationStatus(`Lokasi terverifikasi (${Math.round(distance)} m dari titik sekolah).`);
-        alert("Absen masuk berhasil disimpan. Lokasi berada dalam area sekolah.");
+        setTeacherLocationStatus(ATTENDANCE_GPS_TEST_MODE ? "Mode uji coba: GPS dan radius sementara dinonaktifkan." : `Lokasi terverifikasi (${Math.round(getDistanceMeters(location!.latitude, location!.longitude, SCHOOL_LOCATION.latitude, SCHOOL_LOCATION.longitude))} m dari titik sekolah).`);
+        const timestampDate = new Date(timestamp);
+        setQrAttendanceResult({ profile_id: currentUserId, qr_token: ownEmployeeQr?.qr_token || "", nama: userProfile.nama || name || "Nama belum tersedia", role: role.toLowerCase().replace(/ /g, "_"), foto_url: userProfile.fotoUrl || null, mode: "masuk", time: timestampDate.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" }), date: timestampDate.toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", weekday: "long", day: "numeric", month: "long", year: "numeric" }), address, latitude: location?.latitude ?? null, longitude: location?.longitude ?? null, status: new Date(timestamp).toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }) <= "06:30" ? "Tepat waktu" : "Terlambat" });
+
       } else {
         const { data, error } = await supabase
           .from("teacher_attendance")
@@ -3573,8 +3706,10 @@ export default function Home() {
           .single();
         if (error) throw new Error(`Absen pulang gagal disimpan: ${error.message}`);
         setTeacherAttendanceToday(data);
-        setTeacherLocationStatus(`Lokasi terverifikasi (${Math.round(distance)} m dari titik sekolah).`);
-        alert("Absen pulang berhasil disimpan. Lokasi berada dalam area sekolah.");
+        setTeacherLocationStatus(ATTENDANCE_GPS_TEST_MODE ? "Mode uji coba: GPS dan radius sementara dinonaktifkan." : `Lokasi terverifikasi (${Math.round(getDistanceMeters(location!.latitude, location!.longitude, SCHOOL_LOCATION.latitude, SCHOOL_LOCATION.longitude))} m dari titik sekolah).`);
+        const timestampDate = new Date(timestamp);
+        setQrAttendanceResult({ profile_id: currentUserId, qr_token: ownEmployeeQr?.qr_token || "", nama: userProfile.nama || name || "Nama belum tersedia", role: role.toLowerCase().replace(/ /g, "_"), foto_url: userProfile.fotoUrl || null, mode: "pulang", time: timestampDate.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" }), date: timestampDate.toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", weekday: "long", day: "numeric", month: "long", year: "numeric" }), address, latitude: location?.latitude ?? null, longitude: location?.longitude ?? null, status: "Absen pulang" });
+
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Terjadi kesalahan saat memverifikasi lokasi.";
@@ -5128,6 +5263,27 @@ export default function Home() {
                     <button onClick={saveUserProfile} disabled={profileSaving} className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60">{profileSaving ? "Menyimpan..." : "Simpan Perubahan"}</button>
                   </div>
                 </section>
+              </div>
+            </div>
+          )}
+
+          {photoCropSrc && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Atur foto profil">
+              <div className="my-auto w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl sm:p-6">
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div><h2 className="text-xl font-bold text-slate-900">Atur Foto Profil</h2><p className="mt-1 text-sm text-slate-500">Geser foto agar pas, lalu atur ukuran dengan zoom.</p></div>
+                  <button type="button" onClick={() => setPhotoCropSrc("")} className="rounded-xl px-3 py-2 text-slate-500 hover:bg-slate-100" aria-label="Tutup editor">✕</button>
+                </div>
+                <div className="relative mx-auto mb-5 flex h-[280px] w-[280px] max-w-full touch-none items-center justify-center overflow-hidden rounded-2xl bg-slate-100" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); photoCropDragStart.current = { x: event.clientX, y: event.clientY, offsetX: photoCropOffset.x, offsetY: photoCropOffset.y }; setPhotoCropDragging(true); }} onPointerMove={(event) => { if (!photoCropDragStart.current) return; setPhotoCropOffset({ x: photoCropDragStart.current.offsetX + event.clientX - photoCropDragStart.current.x, y: photoCropDragStart.current.offsetY + event.clientY - photoCropDragStart.current.y }); }} onPointerUp={() => { photoCropDragStart.current = null; setPhotoCropDragging(false); }} onPointerCancel={() => { photoCropDragStart.current = null; setPhotoCropDragging(false); }}>
+                  <img src={photoCropSrc} alt="Pratinjau potongan foto" draggable={false} className={`h-full w-full select-none object-cover ${photoCropDragging ? "cursor-grabbing" : "cursor-grab"}`} style={{ transform: `translate(${photoCropOffset.x}px, ${photoCropOffset.y}px) scale(${photoCropZoom})` }} />
+                  <div className="pointer-events-none absolute h-[280px] w-[280px] max-w-full rounded-full border-2 border-white/90 shadow-[0_0_0_999px_rgba(15,23,42,0.12)]" />
+                </div>
+                <div className="mb-5">
+                  <div className="mb-2 flex items-center justify-between text-sm font-medium text-slate-600"><label htmlFor="profile-photo-zoom">Perbesar / perkecil</label><span>{Math.round(photoCropZoom * 100)}%</span></div>
+                  <input id="profile-photo-zoom" type="range" min="1" max="3" step="0.05" value={photoCropZoom} onChange={(event) => setPhotoCropZoom(Number(event.target.value))} className="w-full accent-emerald-600" />
+                  <p className="mt-2 text-xs text-slate-400">Tip: sentuh atau klik foto lalu geser untuk mengatur posisi wajah.</p>
+                </div>
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" onClick={() => { setPhotoCropSrc(""); setPhotoCropZoom(1); setPhotoCropOffset({ x: 0, y: 0 }); }} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Batal</button><button type="button" onClick={saveCroppedProfilePhoto} className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-emerald-700">Simpan Foto</button></div>
               </div>
             </div>
           )}
@@ -7069,7 +7225,7 @@ export default function Home() {
                   <div className="grid gap-5 p-5 md:grid-cols-2">
                     <div><EmployeeQrScanner onScan={handleEmployeeQrScan} /><p className="mt-2 text-xs text-gray-500">Izinkan akses kamera. Jika kamera tidak berjalan, pastikan situs dibuka melalui HTTPS atau localhost.</p></div>
                     <div>
-                      {qrAttendanceResult && <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4"><p className="font-bold text-emerald-800">Absensi berhasil tersimpan</p><p className="mt-1 text-sm text-gray-800">{qrAttendanceResult.nama} · {qrAttendanceResult.mode === "masuk" ? "Absen masuk" : "Absen pulang"}</p><p className="text-sm text-gray-700">Waktu: {qrAttendanceResult.time} WIB</p><p className={`mt-1 text-sm font-bold ${qrAttendanceResult.status === "Terlambat" ? "text-red-700" : "text-emerald-700"}`}>Status: {qrAttendanceResult.status}</p><p className="mt-1 text-xs text-gray-600">Lokasi: {qrAttendanceResult.address}</p></div>}
+                      {qrAttendanceResult && <AttendanceIdCard result={qrAttendanceResult} schoolName={schoolSettings.namaSekolah || "SD Islam Al-Barkah"} onClose={() => setQrAttendanceResult(null)} />}
                       {scannedEmployee ? <div className="rounded-2xl border border-cyan-200 p-4 text-center">
                         {scannedEmployee.foto_url ? <img src={scannedEmployee.foto_url} alt={`Foto ${scannedEmployee.nama}`} className="mx-auto mb-3 h-20 w-20 rounded-full object-cover" /> : <div className="mx-auto mb-3 flex h-20 w-20 items-center justify-center rounded-full bg-cyan-100 text-3xl font-bold text-cyan-800">{scannedEmployee.nama.charAt(0).toUpperCase()}</div>}
                         <h4 className="text-lg font-bold text-gray-900">{scannedEmployee.nama}</h4><p className="mb-4 text-sm capitalize text-gray-500">{scannedEmployee.role.replace("_", " ")}</p>
@@ -7088,7 +7244,7 @@ export default function Home() {
                       <div className="border-b border-emerald-100 bg-emerald-50 px-5 py-4">
                         <p className="text-sm font-semibold text-emerald-700">Absensi Guru</p>
                         <h3 className="mt-1 text-lg font-bold text-gray-900">Kehadiran di Sekolah</h3>
-                        <p className="mt-1 text-sm text-gray-600">Absensi datang dan pulang menggunakan akun guru serta GPS. Foto selfie tidak digunakan.</p>
+                        <p className="mt-1 text-sm text-gray-600">Absensi datang dan pulang menggunakan QR pribadi. GPS/radius sedang dinonaktifkan sementara untuk uji coba; aktifkan kembali setelah pengujian.</p>
                       </div>
                       <div className="p-5">
                         <div className="mb-5 flex items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -7128,16 +7284,17 @@ export default function Home() {
                           </div>
                         )}
                         {ownQrScannerMessage && <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">{ownQrScannerMessage}</div>}
+                        {qrAttendanceResult && qrAttendanceResult.profile_id === currentUserId && <AttendanceIdCard result={qrAttendanceResult} schoolName={schoolSettings.namaSekolah || "SD Islam Al-Barkah"} onClose={() => setQrAttendanceResult(null)} />}
                         <div className="grid gap-4 md:grid-cols-2">
                           <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-5">
                             <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">Absen Masuk</p>
                             <p className="mt-1 font-bold text-gray-900">{teacherAttendanceToday?.jam_masuk ? "Sudah absen" : "Belum absen"}</p>
-                            {teacherAttendanceToday?.jam_masuk ? <div className="mt-4 rounded-xl bg-white p-4"><p className="text-xs text-gray-500">Jam masuk</p><p className="mt-1 text-2xl font-black text-emerald-700">{new Date(teacherAttendanceToday.jam_masuk).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB</p><p className="mt-2 text-xs text-gray-600">{teacherAttendanceToday.alamat_masuk || "Alamat belum tersedia"}</p></div> : <button type="button" onClick={() => { setTeacherAttendanceMode("masuk"); setOwnQrScannerMessage(""); if (!ownEmployeeQr?.is_active || !ownEmployeeQr.qr_token) { setOwnQrScannerMessage("QR pribadi belum tersedia. Minta admin membuat QR pegawai terlebih dahulu."); return; } setOwnQrScannerOpen(true); }} disabled={attendanceSaving || ownEmployeeQrLoading} className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">{locationChecking && teacherAttendanceMode === "masuk" ? "Memeriksa GPS..." : "📷 Scan QR & Absen Masuk"}</button>}
+                            {teacherAttendanceToday?.jam_masuk ? <div className="mt-4 rounded-xl bg-white p-4"><p className="text-xs text-gray-500">Jam masuk</p><p className="mt-1 text-2xl font-black text-emerald-700">{new Date(teacherAttendanceToday.jam_masuk).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB</p><p className="mt-2 text-xs text-gray-600">{teacherAttendanceToday.alamat_masuk || "Alamat belum tersedia"}</p></div> : <button type="button" onClick={() => { setTeacherAttendanceMode("masuk"); setOwnQrScannerMessage(""); if (!ownEmployeeQr?.is_active || !ownEmployeeQr.qr_token) { setOwnQrScannerMessage("QR pribadi belum tersedia. Minta admin membuat QR pegawai terlebih dahulu."); return; } setOwnQrScannerOpen(true); }} disabled={attendanceSaving || ownEmployeeQrLoading} className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">{locationChecking && teacherAttendanceMode === "masuk" ? "Menyimpan absensi..." : "📷 Scan QR & Absen Masuk"}</button>}
                           </div>
                           <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-5">
                             <p className="text-xs font-bold uppercase tracking-wide text-blue-700">Absen Pulang</p>
                             <p className="mt-1 font-bold text-gray-900">{teacherAttendanceToday?.jam_pulang ? "Sudah absen" : teacherAttendanceToday?.jam_masuk ? "Siap absen pulang" : "Belum tersedia"}</p>
-                            {teacherAttendanceToday?.jam_pulang ? <div className="mt-4 rounded-xl bg-white p-4"><p className="text-xs text-gray-500">Jam pulang</p><p className="mt-1 text-2xl font-black text-blue-700">{new Date(teacherAttendanceToday.jam_pulang).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB</p><p className="mt-2 text-xs text-gray-600">{teacherAttendanceToday.alamat_pulang || "Alamat belum tersedia"}</p></div> : teacherAttendanceToday?.jam_masuk ? <button type="button" onClick={() => { setTeacherAttendanceMode("pulang"); setOwnQrScannerMessage(""); if (!ownEmployeeQr?.is_active || !ownEmployeeQr.qr_token) { setOwnQrScannerMessage("QR pribadi belum tersedia. Minta admin membuat QR pegawai terlebih dahulu."); return; } setOwnQrScannerOpen(true); }} disabled={attendanceSaving || ownEmployeeQrLoading} className="mt-4 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50">{locationChecking && teacherAttendanceMode === "pulang" ? "Memeriksa GPS..." : "📷 Scan QR & Absen Pulang"}</button> : <div className="mt-4 rounded-xl bg-gray-100 p-4 text-center"><p className="text-sm font-semibold text-gray-500">Absen masuk terlebih dahulu</p></div>}
+                            {teacherAttendanceToday?.jam_pulang ? <div className="mt-4 rounded-xl bg-white p-4"><p className="text-xs text-gray-500">Jam pulang</p><p className="mt-1 text-2xl font-black text-blue-700">{new Date(teacherAttendanceToday.jam_pulang).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB</p><p className="mt-2 text-xs text-gray-600">{teacherAttendanceToday.alamat_pulang || "Alamat belum tersedia"}</p></div> : teacherAttendanceToday?.jam_masuk ? <button type="button" onClick={() => { setTeacherAttendanceMode("pulang"); setOwnQrScannerMessage(""); if (!ownEmployeeQr?.is_active || !ownEmployeeQr.qr_token) { setOwnQrScannerMessage("QR pribadi belum tersedia. Minta admin membuat QR pegawai terlebih dahulu."); return; } setOwnQrScannerOpen(true); }} disabled={attendanceSaving || ownEmployeeQrLoading} className="mt-4 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50">{locationChecking && teacherAttendanceMode === "pulang" ? "Menyimpan absensi..." : "📷 Scan QR & Absen Pulang"}</button> : <div className="mt-4 rounded-xl bg-gray-100 p-4 text-center"><p className="text-sm font-semibold text-gray-500">Absen masuk terlebih dahulu</p></div>}
                           </div>
                         </div>
                       </div>
