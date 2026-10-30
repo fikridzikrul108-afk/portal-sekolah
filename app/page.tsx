@@ -3273,9 +3273,51 @@ export default function Home() {
     }
   }, [loggedIn, role, currentUserId, attendanceDate]);
 
+        useEffect(() => {
+    if (!loggedIn || !currentUserId) {
+      setActivityRows([]);
+      return;
+    }
+
+    let active = true;
+    const loadActivities = async () => {
+      const { data, error } = await supabase
+        .from("activity_logs")
+        .select("id, table_name, action, actor_id, actor_name, target_name, created_at")
+        .order("created_at", { ascending: false })
+        .limit(8);
+
+      if (!active) return;
+      if (error) {
+        console.error("Gagal memuat aktivitas terbaru:", error.message);
+        return;
+      }
+      setActivityRows((data ?? []) as typeof activityRows);
+    };
+
+    void loadActivities();
+    const channel = supabase
+      .channel("school-activity-feed")
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "activity_logs",
+      }, () => { void loadActivities(); })
+      .subscribe();
+
+    const refreshOnFocus = () => { void loadActivities(); };
+    window.addEventListener("focus", refreshOnFocus);
+
+    return () => {
+      active = false;
+      window.removeEventListener("focus", refreshOnFocus);
+      void supabase.removeChannel(channel);
+    };
+  }, [loggedIn, currentUserId]);
+
   const exportTeacherAttendanceMonthlyPdf = async () => {
-    if (role !== "Admin" || !currentUserId) {
-      alert("Laporan PDF absensi pegawai hanya dapat diakses admin.");
+    if ((role !== "Admin" && role !== "Kepala Sekolah") || !currentUserId) {
+      alert("Laporan PDF absensi pegawai hanya dapat diakses admin dan kepala sekolah.");
       return;
     }
 
@@ -3321,48 +3363,6 @@ export default function Home() {
       const esc = (value: unknown) => String(value ?? "—").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
       const sortedProfiles = [...(profiles ?? [])].sort((a: any, b: any) => {
         const order: Record<string, number> = { kepala_sekolah: 0, admin: 1, guru: 2 };
-        useEffect(() => {
-    if (!loggedIn || !currentUserId) {
-      setActivityRows([]);
-      return;
-    }
-
-    let active = true;
-    const loadActivities = async () => {
-      const { data, error } = await supabase
-        .from("activity_logs")
-        .select("id, table_name, action, actor_id, actor_name, target_name, created_at")
-        .order("created_at", { ascending: false })
-        .limit(8);
-
-      if (!active) return;
-      if (error) {
-        console.error("Gagal memuat aktivitas terbaru:", error.message);
-        return;
-      }
-      setActivityRows((data ?? []) as typeof activityRows);
-    };
-
-    void loadActivities();
-    const channel = supabase
-      .channel("school-activity-feed")
-      .on("postgres_changes", {
-        event: "*",
-        schema: "public",
-        table: "activity_logs",
-      }, () => { void loadActivities(); })
-      .subscribe();
-
-    const refreshOnFocus = () => { void loadActivities(); };
-    window.addEventListener("focus", refreshOnFocus);
-
-    return () => {
-      active = false;
-      window.removeEventListener("focus", refreshOnFocus);
-      void supabase.removeChannel(channel);
-    };
-  }, [loggedIn, currentUserId]);
-
   return (order[String(a.role).toLowerCase()] ?? 3) - (order[String(b.role).toLowerCase()] ?? 3) || String(a.nama ?? "").localeCompare(String(b.nama ?? ""), "id");
       });
       const rows = sortedProfiles.map((profile: any, index: number) => {
@@ -3394,8 +3394,8 @@ export default function Home() {
 
 
   const exportTeacherAttendanceMonthlySummaryPdf = async () => {
-    if (role !== "Admin" || !currentUserId) {
-      alert("Laporan PDF absensi pegawai hanya dapat diakses admin.");
+    if ((role !== "Admin" && role !== "Kepala Sekolah") || !currentUserId) {
+      alert("Laporan PDF absensi pegawai hanya dapat diakses admin dan kepala sekolah.");
       return;
     }
     const printWindow = window.open("", "_blank");
@@ -4477,15 +4477,43 @@ export default function Home() {
         ).values()
       );
 
+  const selectedJournalClassName =
+    journalClassOptions.find((item) => item.id === journalClassId)?.nama ?? "";
+  const isJournalWaliKelas4Ali =
+    normalizeSubjectName(selectedJournalClassName) === normalizeSubjectName("4 Ali") &&
+    teacherAssignments.some(
+      (item) => item.isWaliKelas && item.classId === journalClassId
+    );
+
   const journalSubjectOptions = role === "Admin" || role === "Kepala Sekolah"
     ? attendanceSubjects
-    : Array.from(
-        new Map(
-          teacherAssignments
-            .filter((item) => item.subjectId && item.subjectName && (!journalClassId || item.classId === journalClassId))
-            .map((item) => [item.subjectId, { id: item.subjectId, name: item.subjectName, code: item.subjectCode }])
-        ).values()
-      );
+    : isJournalWaliKelas4Ali
+      ? Array.from(
+          new Map(
+            [
+              // Khusus jurnal wali kelas 4 Ali: tampilkan mapel wali kelas
+              // dari master subjects, lalu gabungkan mapel tugas mengajar
+              // (misalnya PJOK) agar pilihan yang sudah ada tidak hilang.
+              ...attendanceSubjects
+                .filter((subject) => isWaliKelasSubject(subject.name, selectedJournalClassName))
+                .map((subject) => [subject.id, subject] as [string, typeof subject]),
+              ...teacherAssignments
+                .filter((item) => item.classId === journalClassId && item.subjectId && item.subjectName)
+                .map((item) => [item.subjectId, {
+                  id: item.subjectId,
+                  name: item.subjectName,
+                  code: item.subjectCode,
+                }] as [string, { id: string; name: string; code: string }]),
+            ]
+          ).values()
+        )
+      : Array.from(
+          new Map(
+            teacherAssignments
+              .filter((item) => item.subjectId && item.subjectName && (!journalClassId || item.classId === journalClassId))
+              .map((item) => [item.subjectId, { id: item.subjectId, name: item.subjectName, code: item.subjectCode }])
+          ).values()
+        );
 
   const loadJournalData = async () => {
     setJournalLoading(true);
@@ -7372,7 +7400,7 @@ export default function Home() {
                           <p className="mt-1 text-sm text-gray-600">Hari kerja Senin–Jumat. Batas masuk tepat waktu pukul 06.30 WIB. PDF harian untuk detail tanggal tertentu dan PDF bulanan untuk ringkasan otomatis seluruh pegawai.</p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
-                           {role === "Admin" && <div className="flex flex-wrap items-end gap-3">
+                           {(role === "Admin" || role === "Kepala Sekolah") && <div className="flex flex-wrap items-end gap-3">
                              <label className="flex flex-col gap-1 text-xs font-semibold text-gray-600">Tanggal laporan harian<input type="date" value={selectedPdfAttendanceDate} max={todayDateString} onChange={(e) => setSelectedPdfAttendanceDate(e.target.value)} className="rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm text-gray-800" /></label>
                              <button type="button" onClick={() => void exportTeacherAttendanceMonthlyPdf()} className="rounded-xl bg-violet-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-violet-700">📄 PDF Harian</button>
                              <label className="flex flex-col gap-1 text-xs font-semibold text-gray-600">Bulan laporan bulanan<input type="month" value={selectedPdfAttendanceMonth} max={todayDateString.slice(0, 7)} onChange={(e) => setSelectedPdfAttendanceMonth(e.target.value)} className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm text-gray-800" /></label>
