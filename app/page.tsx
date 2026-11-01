@@ -172,6 +172,65 @@ const SCHOOL_LOCATION = { latitude: -7.064855, longitude: 107.568025, radiusMete
 // GPS dan validasi radius absensi aktif.
 const ATTENDANCE_GPS_TEST_MODE = false;
 
+// Jadwal hari wajib hadir dan batas tepat waktu absensi pagi (WIB).
+// Guru yang tidak tercantum mengikuti jadwal umum Senin–Jumat.
+const TEACHER_ATTENDANCE_SCHEDULE: Record<string, { days: number[]; thursdayCutoff?: string }> = {
+  "sofian": { days: [2, 3] },
+  "niky komala dewi s pd": { days: [2, 4, 5], thursdayCutoff: "08:50" },
+  "sumiati": { days: [1, 2, 3, 4, 5] },
+  "indra priadi": { days: [1, 2, 3, 4, 5] },
+  "annisa fauzi": { days: [2, 3, 4] },
+  "siti nurf": { days: [1, 2, 3, 5] },
+  "dandi zaenudin s pd": { days: [1, 2, 3, 4] },
+  "rika meliana s pd": { days: [1, 2, 3, 4, 5] },
+  "ihsan fauzan": { days: [1, 2, 3, 4, 5] },
+  "ceng imam qusaeri s pd": { days: [1, 2, 3, 4, 5] },
+  "eggi gismanto s pd": { days: [3] },
+  "siti mutiara": { days: [1, 2, 4, 5] },
+  "fawaz naufal s h": { days: [1, 2, 3, 4, 5] },
+  "yopi irawan": { days: [3, 4, 5] },
+  "faisal akbar yusuf s pd": { days: [1, 2, 3, 4, 5] },
+  "azkiya khoerunnisa": { days: [1, 2, 3, 4, 5] },
+};
+
+const normalizeAttendanceTeacherName = (value: unknown) =>
+  String(value ?? "")
+    .toLocaleLowerCase("id-ID")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+
+const getTeacherAttendanceSchedule = (name: unknown) => {
+  const normalizedName = normalizeAttendanceTeacherName(name);
+  const exact = TEACHER_ATTENDANCE_SCHEDULE[normalizedName];
+  if (exact) return exact;
+  // Toleransi untuk variasi titik/koma/gelar yang kadang tersimpan di profil.
+  const key = Object.keys(TEACHER_ATTENDANCE_SCHEDULE).find((item) =>
+    normalizedName.startsWith(item) || item.startsWith(normalizedName)
+  );
+  return key ? TEACHER_ATTENDANCE_SCHEDULE[key] : { days: [1, 2, 3, 4, 5] };
+};
+
+const isTeacherScheduledOnDate = (name: unknown, date: string) => {
+  const day = new Date(`${date}T12:00:00+07:00`).getDay();
+  return getTeacherAttendanceSchedule(name).days.includes(day);
+};
+
+const getTeacherMorningCutoff = (name: unknown, date: string) => {
+  const schedule = getTeacherAttendanceSchedule(name);
+  const day = new Date(`${date}T12:00:00+07:00`).getDay();
+  return day === 4 && schedule.thursdayCutoff ? schedule.thursdayCutoff : "06:30";
+};
+
+const isTeacherOnTime = (name: unknown, date: string, timestamp: string | Date) => {
+  const time = new Date(timestamp).toLocaleTimeString("en-GB", {
+    timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+  return time <= getTeacherMorningCutoff(name, date);
+};
+
 type Role = "Admin" | "Kepala Sekolah" | "Guru" | "Siswa" | "Orang Tua";
 
 type MenuIconName = "user" | "dashboard" | "students" | "teachers" | "calendar" | "report" | "journal" | "remedial" | "bk" | "attendance" | "billing" | "settings" | "help" | "ai" | "logout" | "menu" | "search" | "bell" | "sun" | "moon";
@@ -1053,6 +1112,8 @@ export default function Home() {
     catatan: "",
   });
   const [journalAbsences, setJournalAbsences] = useState<Record<string, string>>({});
+  const [journalStudentAttendance, setJournalStudentAttendance] = useState<Record<string, string>>({});
+  const [journalAttendanceLoading, setJournalAttendanceLoading] = useState(false);
 
   const [programClasses, setProgramClasses] = useState<{ id: string; nama: string }[]>([]);
   const [programStudents, setProgramStudents] = useState<{ id: string; nama: string; nis: string; class_id: string }[]>([]);
@@ -1310,6 +1371,53 @@ export default function Home() {
     };
     image.onerror = () => alert("Foto tidak dapat dibaca. Silakan pilih gambar lain.");
     image.src = photoCropSrc;
+  };
+
+
+  // Cetak format administrasi pembelajaran. Dari dialog cetak browser,
+  // pengguna dapat memilih printer atau "Save as PDF".
+  const printSchoolLearningDocument = (
+    title: string,
+    headers: string[],
+    rows: (string | number)[][],
+    teacherLabel = name || "Guru Mata Pelajaran",
+  ) => {
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      alert("Pop-up diblokir. Izinkan pop-up untuk portal sekolah lalu coba lagi.");
+      return;
+    }
+    const esc = (value: unknown) => String(value ?? "-")
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const tableHead = headers.map((h) => `<th>${esc(h)}</th>`).join("");
+    const tableRows = rows.map((row) => `<tr>${row.map((cell) => `<td>${esc(cell)}</td>`).join("")}</tr>`).join("");
+    const school = schoolSettings.namaSekolah || "SD Islam Al-Barkah";
+    const subject = title.includes("Remedial") ? "Berbagai Mata Pelajaran"
+      : title.includes("Bimbingan Konseling") ? "Bimbingan Konseling"
+      : journalSubjectOptions.find((item) => item.id === journalSubjectId)?.name || "Berbagai Mata Pelajaran";
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
+      <style>
+      @page{size:A4 landscape;margin:12mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172033;font-size:10px}
+      h1{text-align:center;color:#176d68;font-size:20px;margin:0 0 5px}
+      .meta{text-align:center;font-size:11px;margin-bottom:18px;color:#475569}
+      table{width:100%;border-collapse:collapse;table-layout:auto}
+      th,td{border:1px solid #9aa7b4;padding:6px 5px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+      th{background:#dff4f1;text-align:center;font-weight:bold}
+      .signatures{display:flex;justify-content:space-between;margin-top:38px;page-break-inside:avoid}
+      .sign{width:38%;text-align:center;min-height:75px}.line{margin-top:45px;border-top:1px solid #333;padding-top:5px}
+      .print-note{text-align:center;color:#64748b;font-size:9px;margin-top:12px}
+      @media print{.print-note{display:none}}
+      </style></head><body><h1>${esc(title)}</h1>
+      <div class="meta">${esc(school)} &nbsp;•&nbsp; Tahun Pelajaran ${esc(schoolSettings.tahunAjaran || "2026/2027")} &nbsp;•&nbsp; ${esc(subject)}</div>
+      <table><thead><tr>${tableHead}</tr></thead><tbody>${tableRows || `<tr><td colspan="${headers.length}" style="text-align:center">Belum ada data</td></tr>`}</tbody></table>
+      <div class="signatures"><div class="sign">Mengetahui,<br>Kepala Sekolah<div class="line">${esc(schoolSettings.namaKepalaSekolah || "Sofian, S.Pd.I., M.Pd., Gr")}</div></div>
+      <div class="sign">Guru Mata Pelajaran<div class="line">${esc(teacherLabel)}</div></div></div>
+      <p class="print-note">Pilih Cetak atau Simpan sebagai PDF pada tujuan printer.</p>
+      <script>window.onload=()=>setTimeout(()=>window.print(),350);</script></body></html>`;
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
   };
 
   const visibleMenuItems = menuItems.filter((item) => item.roles.includes(role));
@@ -3370,18 +3478,21 @@ export default function Home() {
       });
       const rows = sortedProfiles.map((profile: any, index: number) => {
         const records = (attendanceData ?? []).filter((item: any) => item.guru_id === profile.id);
-        const todayRecord = records.find((item: any) => item.tanggal === reportDate);
-        const presentDates = new Set(records.filter((item: any) => (item.status ?? "hadir") === "hadir" && Boolean(item.jam_masuk) && workDates.includes(item.tanggal)).map((item: any) => item.tanggal));
-        const percentage = workDates.length ? Math.round((presentDates.size / workDates.length) * 100) : 0;
-        let status = "Alfa";
-        let statusClass = "absent";
+        const profileWorkDates = workDates.filter((date) => isTeacherScheduledOnDate(profile.nama, date));
+        const profileRecords = records.filter((item: any) => profileWorkDates.includes(item.tanggal));
+        const todayIsScheduled = isTeacherScheduledOnDate(profile.nama, reportDate);
+        const todayRecord = todayIsScheduled ? records.find((item: any) => item.tanggal === reportDate) : undefined;
+        const presentDates = new Set(profileRecords.filter((item: any) => (item.status ?? "hadir") === "hadir" && Boolean(item.jam_masuk)).map((item: any) => item.tanggal));
+        const percentage = profileWorkDates.length ? Math.round((presentDates.size / profileWorkDates.length) * 100) : 0;
+        let status = todayIsScheduled ? "Alfa" : "Tidak terjadwal";
+        let statusClass = todayIsScheduled ? "absent" : "";
         const savedStatus = String(todayRecord?.status ?? "hadir").toLowerCase();
-        if (savedStatus === "izin") { status = "Izin"; statusClass = "absent"; }
+        if (!todayIsScheduled) { status = "Tidak terjadwal"; statusClass = ""; }
+        else if (savedStatus === "izin") { status = "Izin"; statusClass = "absent"; }
         else if (savedStatus === "sakit") { status = "Sakit"; statusClass = "absent"; }
         else if (savedStatus === "alfa") { status = "Alfa"; statusClass = "absent"; }
         else if (todayRecord?.jam_masuk) {
-          const time = new Date(todayRecord.jam_masuk).toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false });
-          if (time <= "06:30") { status = "Hadir · Tepat waktu"; statusClass = "ontime"; }
+          if (isTeacherOnTime(profile.nama, reportDate, todayRecord.jam_masuk)) { status = "Hadir · Tepat waktu"; statusClass = "ontime"; }
           else { status = "Hadir · Terlambat"; statusClass = "late"; }
         } else if (todayRecord) { status = "Hadir"; statusClass = "ontime"; }
         return `<tr><td class="center">${index + 1}</td><td>${esc(profile.nama ?? "Nama belum diatur")}</td><td>${esc(roleLabels[String(profile.role ?? "").toLowerCase()] ?? profile.role ?? "Pegawai")}</td><td class="center">${todayRecord?.jam_masuk ? esc(new Date(todayRecord.jam_masuk).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false })) : "—"}</td><td class="status ${statusClass}">${status}</td><td class="center">${todayRecord?.jam_pulang ? esc(new Date(todayRecord.jam_pulang).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false })) : "—"}</td><td class="center">${percentage}%</td><td>${todayRecord?.alamat_masuk || todayRecord?.latitude_masuk != null || todayRecord?.longitude_masuk != null ? "GPS tercatat" : "Belum ada data GPS"}</td></tr>`;
@@ -3391,7 +3502,7 @@ export default function Home() {
       printWindow.document.open();
       printWindow.document.write(`<!doctype html><html><head><meta charset="UTF-8"><title>${esc(title)}</title><style>
         @page{size:A4 landscape;margin:9mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:10px}h1{font-size:19px;margin:0 0 5px}h2{font-size:13px;margin:0 0 5px}p{margin:3px 0 12px;color:#444;font-size:10px}.meta{display:flex;justify-content:space-between;gap:12px;margin-bottom:10px}.legend{font-size:9px;color:#444;margin-top:9px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #cbd5e1;padding:6px 5px;text-align:left;overflow-wrap:anywhere}th{background:#e2e8f0;font-size:9px}td{font-size:9px}.center{text-align:center}.status{font-weight:bold;text-align:center}.ontime{color:#166534;background:#dcfce7}.late{color:#991b1b;background:#fee2e2}.absent{color:#475569;background:#f1f5f9}tr{break-inside:avoid}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-      </style></head><body><h1>${esc(schoolSettings.namaSekolah || "SD Islam Al-Barkah")}</h1><h2>Rekap Absensi Pegawai Harian</h2><div class="meta"><p>Tanggal laporan: <b>${esc(reportDateLabel)}</b><br>Batas tepat waktu: <b>06.30 WIB</b> (pukul 06.30 tepat masih tepat waktu)</p><p>Persentase = hari hadir bulan berjalan ÷ hari kerja Senin–Jumat sampai tanggal laporan.</p></div><table><thead><tr><th style="width:4%">No.</th><th style="width:19%">Nama Pegawai</th><th style="width:13%">Jabatan</th><th style="width:9%">Jam Masuk</th><th style="width:17%">Hadir / Status</th><th style="width:9%">Jam Pulang</th><th style="width:8%">Persentase</th><th style="width:21%">Lokasi</th></tr></thead><tbody>${rows}</tbody></table><div class="legend">Hijau: hadir tepat waktu · Merah: hadir terlambat · Abu-abu: tidak hadir. Status yang sama berlaku untuk admin, kepala sekolah, dan guru.</div><script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250)};</script></body></html>`);
+      </style></head><body><h1>${esc(schoolSettings.namaSekolah || "SD Islam Al-Barkah")}</h1><h2>Rekap Absensi Pegawai Harian</h2><div class="meta"><p>Tanggal laporan: <b>${esc(reportDateLabel)}</b><br>Batas tepat waktu mengikuti ketentuan jadwal masing-masing guru</p><p>Persentase = hari hadir ÷ hari wajib sesuai jadwal masing-masing sampai tanggal laporan.</p></div><table><thead><tr><th style="width:4%">No.</th><th style="width:19%">Nama Pegawai</th><th style="width:13%">Jabatan</th><th style="width:9%">Jam Masuk</th><th style="width:17%">Hadir / Status</th><th style="width:9%">Jam Pulang</th><th style="width:8%">Persentase</th><th style="width:21%">Lokasi</th></tr></thead><tbody>${rows}</tbody></table><div class="legend">Hijau: hadir tepat waktu · Merah: hadir terlambat · Abu-abu: tidak hadir. Status yang sama berlaku untuk admin, kepala sekolah, dan guru.</div><script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250)};</script></body></html>`);
       printWindow.document.close();
     } catch (error) {
       printWindow.document.body.innerHTML = `<p style="font-family:Arial;color:#b91c1c;padding:24px">Gagal membuat laporan PDF: ${String(error instanceof Error ? error.message : "Terjadi kesalahan.")}</p>`;
@@ -3421,6 +3532,9 @@ export default function Home() {
       const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
       const monthEnd = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
       const reportEndDate = monthStart.slice(0, 7) === today.slice(0, 7) ? today : (monthEnd > today ? today : monthEnd);
+      const jakartaClockParts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date());
+      const clockPart = (type: string) => jakartaClockParts.find((item) => item.type === type)?.value ?? "00";
+      const jakartaMinutesNow = Number(clockPart("hour")) * 60 + Number(clockPart("minute"));
       if (monthStart > today) throw new Error("Pilih bulan yang tidak melewati bulan berjalan.");
       const monthLabel = new Date(`${monthStart}T12:00:00+07:00`).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", month: "long", year: "numeric" });
       const [{ data: profiles, error: profileError }, { data: attendanceData, error: attendanceError }] = await Promise.all([
@@ -3429,10 +3543,25 @@ export default function Home() {
       ]);
       if (profileError) throw profileError;
       if (attendanceError) throw attendanceError;
-      const workDates: string[] = [];
-      for (let d = new Date(`${monthStart}T12:00:00+07:00`); d <= new Date(`${reportEndDate}T12:00:00+07:00`); d.setDate(d.getDate() + 1)) {
-        const weekday = d.getDay();
-        if (weekday !== 0 && weekday !== 6) workDates.push(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(d));
+      // Hari wajib satu bulan penuh untuk penyebut persentase.
+      // Data hadir hanya dihitung sampai tanggal laporan; tanggal mendatang
+      // tidak dimasukkan ke kolom alfa/belum tercatat.
+      const fullMonthWorkDates: string[] = [];
+      const elapsedWorkDates: string[] = [];
+      for (let d = new Date(`${monthStart}T00:00:00Z`); d <= new Date(`${monthEnd}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1)) {
+        const weekday = d.getUTCDay();
+        if (weekday !== 0 && weekday !== 6) {
+          const date = d.toISOString().slice(0, 10);
+          fullMonthWorkDates.push(date);
+          // Hari sebelum hari ini sudah selesai. Hari ini baru masuk hitungan alfa
+          // setelah batas absensi pegawai tersebut terlewati (WIB).
+          if (date < today) elapsedWorkDates.push(date);
+          else if (date === today) {
+            // Jadwal khusus Niky Kamis 08.50; pegawai lain 06.30 WIB.
+            // Nama pegawai dipetakan di bawah, sehingga keputusan hari ini
+            // diterapkan per profil, bukan satu cutoff untuk semua orang.
+          }
+        }
       }
       const roleLabels: Record<string, string> = { guru: "Guru", admin: "Admin", kepala_sekolah: "Kepala Sekolah" };
       const esc = (value: unknown) => String(value ?? "—").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -3441,21 +3570,30 @@ export default function Home() {
         return (order[String(a.role).toLowerCase()] ?? 3) - (order[String(b.role).toLowerCase()] ?? 3) || String(a.nama ?? "").localeCompare(String(b.nama ?? ""), "id");
       });
       const rows = sortedProfiles.map((profile: any, index: number) => {
-        const records = (attendanceData ?? []).filter((item: any) => item.guru_id === profile.id && workDates.includes(item.tanggal));
+        // Gunakan satu aturan yang sama untuk PDF dan tampilan portal:
+        // nama yang memiliki jadwal khusus (termasuk Sofian) mengikuti jadwal itu,
+        // sedangkan nama tanpa jadwal khusus memakai Senin–Jumat.
+        const profileFullMonthDates = fullMonthWorkDates.filter((date) => isTeacherScheduledOnDate(profile.nama, date));
+        const profileElapsedDates = elapsedWorkDates.filter((date) => isTeacherScheduledOnDate(profile.nama, date));
+        if (today >= monthStart && today <= monthEnd && isTeacherScheduledOnDate(profile.nama, today)) {
+          const [cutoffHour, cutoffMinute] = getTeacherMorningCutoff(profile.nama, today).split(":").map(Number);
+          if (jakartaMinutesNow >= cutoffHour * 60 + cutoffMinute) profileElapsedDates.push(today);
+        }
+        const records = (attendanceData ?? []).filter((item: any) => item.guru_id === profile.id && profileElapsedDates.includes(item.tanggal));
         const presentRecords = records.filter((item: any) => (item.status ?? "hadir") === "hadir" && Boolean(item.jam_masuk));
         const presentDates = new Set(presentRecords.map((item: any) => item.tanggal));
-        const onTime = presentRecords.filter((item: any) => new Date(item.jam_masuk).toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }) <= "06:30").length;
+        const onTime = presentRecords.filter((item: any) => isTeacherOnTime(profile.nama, item.tanggal, item.jam_masuk)).length;
         const late = presentRecords.length - onTime;
         const izin = records.filter((item: any) => item.status === "izin").length;
         const sakit = records.filter((item: any) => item.status === "sakit").length;
         const alfa = records.filter((item: any) => item.status === "alfa" || (!item.status && !item.jam_masuk)).length;
-        const unrecorded = Math.max(0, workDates.length - presentDates.size - izin - sakit - alfa);
-        const percentage = workDates.length ? Math.round((presentDates.size / workDates.length) * 100) : 0;
-        return `<tr><td class="center">${index + 1}</td><td>${esc(profile.nama ?? "Nama belum diatur")}</td><td>${esc(roleLabels[String(profile.role ?? "").toLowerCase()] ?? profile.role ?? "Pegawai")}</td><td class="center">${presentDates.size}</td><td class="center ontime">${onTime}</td><td class="center late">${late}</td><td class="center">${izin}</td><td class="center">${sakit}</td><td class="center absent">${alfa + unrecorded}</td><td class="center"><b>${percentage}%</b></td></tr>`;
+        const unrecorded = Math.max(0, profileElapsedDates.length - presentDates.size - izin - sakit - alfa);
+        const percentage = profileFullMonthDates.length ? Math.round((presentDates.size / profileFullMonthDates.length) * 100) : 0;
+        return `<tr><td class="center">${index + 1}</td><td>${esc(profile.nama ?? "Nama belum diatur")}</td><td>${esc(roleLabels[String(profile.role ?? "").toLowerCase()] ?? profile.role ?? "Pegawai")}</td><td class="center">${presentDates.size}</td><td class="center">${profileFullMonthDates.length}</td><td class="center ontime">${onTime}</td><td class="center late">${late}</td><td class="center">${izin}</td><td class="center">${sakit}</td><td class="center absent">${alfa + unrecorded}</td><td class="center"><b>${percentage}%</b></td></tr>`;
       }).join("");
       const title = `Rekap Absensi Pegawai Bulanan — ${monthLabel}`;
       printWindow.document.open();
-      printWindow.document.write(`<!doctype html><html><head><meta charset="UTF-8"><title>${esc(title)}</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:10px}h1{font-size:19px;margin:0 0 5px}h2{font-size:14px;margin:0 0 6px}p{margin:4px 0 12px;color:#444;font-size:10px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #cbd5e1;padding:7px 6px;text-align:left}th{background:#e2e8f0;font-size:10px}td{font-size:10px}.center{text-align:center}.ontime{color:#166534;background:#dcfce7}.late{color:#991b1b;background:#fee2e2}.absent{color:#475569;background:#f1f5f9}.note{margin-top:10px;font-size:9px;color:#475569}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><h1>${esc(schoolSettings.namaSekolah || "SD Islam Al-Barkah")}</h1><h2>Rekap Absensi Pegawai Bulanan</h2><p>Bulan laporan: <b>${esc(monthLabel)}</b> · Hari kerja Senin–Jumat sampai tanggal ${esc(new Date(`${reportEndDate}T12:00:00+07:00`).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" }))}. Batas tepat waktu: 06.30 WIB.</p><table><thead><tr><th style="width:5%">No.</th><th style="width:24%">Nama Pegawai</th><th style="width:18%">Jabatan</th><th style="width:10%">Hari Hadir</th><th style="width:12%">Tepat Waktu</th><th style="width:9%">Terlambat</th><th style="width:8%">Izin</th><th style="width:8%">Sakit</th><th style="width:9%">Alfa / Belum tercatat</th><th style="width:8%">Persentase</th></tr></thead><tbody>${rows}</tbody></table><div class="note">Hijau: tepat waktu (pukul 06.30 WIB atau sebelumnya). Merah: terlambat (setelah 06.30 WIB). Abu-abu: tidak hadir. Persentase = hari hadir ÷ hari kerja pada periode laporan. Rekap otomatis dihitung dari data absensi yang tersimpan.</div><script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250)};</script></body></html>`);
+      printWindow.document.write(`<!doctype html><html><head><meta charset="UTF-8"><title>${esc(title)}</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:10px}h1{font-size:19px;margin:0 0 5px}h2{font-size:14px;margin:0 0 6px}p{margin:4px 0 12px;color:#444;font-size:10px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #cbd5e1;padding:7px 6px;text-align:left}th{background:#e2e8f0;font-size:10px}td{font-size:10px}.center{text-align:center}.ontime{color:#166534;background:#dcfce7}.late{color:#991b1b;background:#fee2e2}.absent{color:#475569;background:#f1f5f9}.note{margin-top:10px;font-size:9px;color:#475569}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><h1>${esc(schoolSettings.namaSekolah || "SD Islam Al-Barkah")}</h1><h2>Rekap Absensi Pegawai Bulanan</h2><p>Bulan laporan: <b>${esc(monthLabel)}</b> · Total hari wajib dihitung untuk satu bulan penuh sesuai jadwal masing-masing pegawai. Kehadiran, izin, sakit, dan alfa dicatat sampai tanggal ${esc(new Date(`${reportEndDate}T12:00:00+07:00`).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" }))}.</p><table><thead><tr><th style="width:4%">No.</th><th style="width:21%">Nama Pegawai</th><th style="width:15%">Jabatan</th><th style="width:9%">Hari Hadir</th><th style="width:9%">Hari Wajib</th><th style="width:10%">Tepat Waktu</th><th style="width:8%">Terlambat</th><th style="width:7%">Izin</th><th style="width:7%">Sakit</th><th style="width:10%">Alfa / Belum tercatat</th><th style="width:7%">Persentase</th></tr></thead><tbody>${rows}</tbody></table><div class="note">Hijau: tepat waktu sesuai batas masing-masing guru. Merah: terlambat setelah batas jadwal. Perhitungan hari kerja mengikuti jadwal masing-masing guru. Abu-abu: tidak hadir. Persentase = hari hadir ÷ total hari wajib satu bulan penuh sesuai jadwal. Tanggal setelah tanggal laporan belum dihitung sebagai alfa/belum tercatat. Rekap otomatis dihitung dari data absensi yang tersimpan.</div><script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250)};</script></body></html>`);
       printWindow.document.close();
     } catch (error) {
       const message = String(error instanceof Error ? error.message : "Terjadi kesalahan.");
@@ -3480,12 +3618,22 @@ export default function Home() {
       if (attendanceError) throw attendanceError;
 
       const jakartaToday = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+      const jakartaClock = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
+      const [clockHour, clockMinute] = jakartaClock.split(":").map(Number);
+      const jakartaMinutesNow = clockHour * 60 + clockMinute;
       const [year, month] = jakartaToday.split("-").map(Number);
       const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
-      const workDates: string[] = [];
-      for (let date = new Date(`${monthStart}T12:00:00+07:00`); date <= new Date(`${jakartaToday}T12:00:00+07:00`); date.setDate(date.getDate() + 1)) {
-        const day = date.getDay();
-        if (day !== 0 && day !== 6) workDates.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`);
+      const lastDayOfMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      const fullMonthDates: string[] = [];
+      const elapsedDates: string[] = [];
+      for (let day = 1; day <= lastDayOfMonth; day++) {
+        const date = new Date(Date.UTC(year, month - 1, day));
+        const dateString = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        const weekday = date.getUTCDay();
+        if (weekday !== 0 && weekday !== 6) {
+          fullMonthDates.push(dateString);
+          if (dateString < jakartaToday) elapsedDates.push(dateString);
+        }
       }
 
       const rows = attendanceData ?? [];
@@ -3496,13 +3644,32 @@ export default function Home() {
       };
       const reportRows = (profiles ?? []).map((profile: any) => {
         const personRecords = rows.filter((item: any) => item.guru_id === profile.id && item.tanggal >= monthStart && item.tanggal <= jakartaToday);
-        const attendedDates = new Set(personRecords.filter((item: any) => (item.status ?? "hadir") === "hadir" && Boolean(item.jam_masuk) && workDates.includes(item.tanggal)).map((item: any) => item.tanggal));
-        const izinDays = personRecords.filter((item: any) => item.status === "izin" && workDates.includes(item.tanggal)).length;
-        const sakitDays = personRecords.filter((item: any) => item.status === "sakit" && workDates.includes(item.tanggal)).length;
-        const alfaDays = personRecords.filter((item: any) => item.status === "alfa" && workDates.includes(item.tanggal)).length;
+        // Sinkron dengan PDF: jadwal khusus dicocokkan berdasarkan nama,
+        // tanpa mengabaikan jadwal Sofian hanya karena jabatannya Kepala Sekolah.
+        // Admin yang tidak punya jadwal khusus otomatis memakai Senin–Jumat.
+        const scheduledFullMonth = fullMonthDates.filter((date) => isTeacherScheduledOnDate(profile.nama, date));
+        const scheduledElapsed = elapsedDates.filter((date) => isTeacherScheduledOnDate(profile.nama, date));
+        const todayIsScheduled = isTeacherScheduledOnDate(profile.nama, jakartaToday);
+        const [cutoffHour, cutoffMinute] = getTeacherMorningCutoff(profile.nama, jakartaToday).split(":").map(Number);
+        const todayCutoffPassed = jakartaMinutesNow >= cutoffHour * 60 + cutoffMinute;
+        if (todayIsScheduled && todayCutoffPassed) scheduledElapsed.push(jakartaToday);
+        const attendedDates = new Set(personRecords.filter((item: any) => (item.status ?? "hadir") === "hadir" && Boolean(item.jam_masuk) && scheduledElapsed.includes(item.tanggal)).map((item: any) => item.tanggal));
+        const izinDays = personRecords.filter((item: any) => item.status === "izin" && scheduledElapsed.includes(item.tanggal)).length;
+        const sakitDays = personRecords.filter((item: any) => item.status === "sakit" && scheduledElapsed.includes(item.tanggal)).length;
+        // Alfa otomatis: hanya tanggal wajib yang sudah terlewati (atau hari ini
+        // setelah cutoff), dan tidak memiliki absensi Hadir maupun status Izin/Sakit
+        // dari Admin. Status alfa yang diinput Admin juga tetap dihitung.
+        const alfaDays = scheduledElapsed.filter((date) => {
+          const dayRecord = personRecords.find((item: any) => item.tanggal === date);
+          if (!dayRecord) return true;
+          const status = String(dayRecord.status ?? "").toLowerCase();
+          if (status === "izin" || status === "sakit") return false;
+          if (status === "hadir" && Boolean(dayRecord.jam_masuk)) return false;
+          return status === "alfa" || !dayRecord.jam_masuk;
+        }).length;
         const latestRecord = personRecords[0];
         const attendedWorkdays = attendedDates.size;
-        const attendancePercentage = workDates.length ? Math.round((attendedWorkdays / workDates.length) * 100) : 0;
+        const attendancePercentage = scheduledFullMonth.length ? Math.round((attendedWorkdays / scheduledFullMonth.length) * 100) : 0;
         return {
           id: String(profile.id),
           guru_id: String(profile.id),
@@ -3525,7 +3692,7 @@ export default function Home() {
           alfaDays,
           attendancePercentage,
           attendedWorkdays,
-          workdaysElapsed: workDates.length,
+          workdaysElapsed: scheduledFullMonth.length,
         };
       }).sort((a: any, b: any) => {
         const roleOrder: Record<string, number> = { "Kepala Sekolah": 0, Admin: 1, Guru: 2 };
@@ -3669,8 +3836,10 @@ export default function Home() {
     if (role !== "Admin" || !scannedEmployee) return;
     const now = new Date();
     const jakartaToday = now.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
-    const jakartaDay = new Date(`${jakartaToday}T12:00:00+07:00`).getDay();
-    if (jakartaDay === 0 || jakartaDay === 6) { setEmployeeQrError("Absensi hanya tersedia Senin–Jumat."); return; }
+    if (!isTeacherScheduledOnDate(scannedEmployee.nama, jakartaToday)) {
+      setEmployeeQrError(`${scannedEmployee.nama} tidak memiliki jadwal mengajar/kehadiran pada hari ini.`);
+      return;
+    }
     setQrAttendanceBusy(true);
     setEmployeeQrError("");
     try {
@@ -3696,7 +3865,7 @@ export default function Home() {
       }
       const timestamp = new Date().toISOString();
       const timeLabel = new Date(timestamp).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" });
-      const isLate = new Date(timestamp).toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }) > "06:30";
+      const isLate = !isTeacherOnTime(scannedEmployee.nama, jakartaToday, timestamp);
       const statusLabel = qrAttendanceMode === "masuk" ? (isLate ? "Terlambat" : "Tepat waktu") : "Absen pulang";
       if (qrAttendanceMode === "masuk") {
         const payload = { guru_id: scannedEmployee.profile_id, tanggal: jakartaToday, jam_masuk: timestamp, ...(ATTENDANCE_GPS_TEST_MODE ? {} : { latitude_masuk: latitude, longitude_masuk: longitude, alamat_masuk: address }), keterangan: statusLabel };
@@ -3738,9 +3907,9 @@ export default function Home() {
       return;
     }
     const jakartaToday = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
-    const jakartaDay = new Date(`${jakartaToday}T12:00:00+07:00`).getDay();
-    if (jakartaDay === 0 || jakartaDay === 6) {
-      alert("Absensi tidak tersedia pada hari Sabtu dan Minggu.");
+    const attendanceProfileName = userProfile.nama || name || "Nama belum tersedia";
+    if (!isTeacherScheduledOnDate(attendanceProfileName, jakartaToday)) {
+      alert("Hari ini bukan jadwal kehadiran Anda sesuai jadwal sekolah.");
       return;
     }
     if (!["Guru", "Admin", "Kepala Sekolah"].includes(role)) {
@@ -3790,7 +3959,7 @@ export default function Home() {
         setTeacherAttendanceMode("pulang");
         setTeacherLocationStatus(ATTENDANCE_GPS_TEST_MODE ? "Mode uji coba: GPS dan radius sementara dinonaktifkan." : `Lokasi terverifikasi (${Math.round(getDistanceMeters(location!.latitude, location!.longitude, SCHOOL_LOCATION.latitude, SCHOOL_LOCATION.longitude))} m dari titik sekolah).`);
         const timestampDate = new Date(timestamp);
-        setQrAttendanceResult({ profile_id: currentUserId, qr_token: ownEmployeeQr?.qr_token || "", nama: userProfile.nama || name || "Nama belum tersedia", role: role.toLowerCase().replace(/ /g, "_"), foto_url: userProfile.fotoUrl || null, mode: "masuk", time: timestampDate.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" }), date: timestampDate.toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", weekday: "long", day: "numeric", month: "long", year: "numeric" }), address, latitude: location?.latitude ?? null, longitude: location?.longitude ?? null, status: new Date(timestamp).toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }) <= "06:30" ? "Tepat waktu" : "Terlambat" });
+        setQrAttendanceResult({ profile_id: currentUserId, qr_token: ownEmployeeQr?.qr_token || "", nama: userProfile.nama || name || "Nama belum tersedia", role: role.toLowerCase().replace(/ /g, "_"), foto_url: userProfile.fotoUrl || null, mode: "masuk", time: timestampDate.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" }), date: timestampDate.toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", weekday: "long", day: "numeric", month: "long", year: "numeric" }), address, latitude: location?.latitude ?? null, longitude: location?.longitude ?? null, status: isTeacherOnTime(attendanceProfileName, attendanceDate, timestamp) ? "Tepat waktu" : "Terlambat" });
 
       } else {
         const { data, error } = await supabase
@@ -4628,6 +4797,38 @@ export default function Home() {
     setJournalLoading(false);
   };
 
+  // Ambil status siswa dari menu Absensi berdasarkan kelas dan tanggal jurnal.
+  useEffect(() => {
+    let cancelled = false;
+    const loadJournalStudentAttendance = async () => {
+      if (!journalFormOpen || !journalClassId || !journalForm.tanggal) {
+        setJournalStudentAttendance({});
+        return;
+      }
+      setJournalAttendanceLoading(true);
+      const { data, error } = await supabase
+        .from("attendance")
+        .select("student_id, status")
+        .eq("class_id", journalClassId)
+        .eq("tanggal", journalForm.tanggal);
+      if (!cancelled) {
+        if (error) {
+          console.error("Gagal mengambil absensi siswa untuk jurnal:", error);
+          setJournalStudentAttendance({});
+        } else {
+          const statusMap: Record<string, string> = {};
+          (data ?? []).forEach((row: any) => {
+            statusMap[row.student_id] = row.status;
+          });
+          setJournalStudentAttendance(statusMap);
+        }
+        setJournalAttendanceLoading(false);
+      }
+    };
+    void loadJournalStudentAttendance();
+    return () => { cancelled = true; };
+  }, [journalFormOpen, journalClassId, journalForm.tanggal]);
+
   const openNewJournal = () => {
     setJournalEditingId(null);
     setJournalForm({
@@ -4729,7 +4930,7 @@ export default function Home() {
     await loadJournalData();
   };
 
-  const loadProgramOptions = async () => {
+  const loadProgramOptions = async (context: "remedial" | "bk" = "remedial") => {
     if (!currentUserId) return;
     const classMap = new Map<string, { id: string; nama: string }>();
     const subjectMap = new Map<string, { id: string; nama: string; kode: string }>();
@@ -4753,12 +4954,20 @@ export default function Home() {
     setProgramClasses(classesArray);
     setProgramSubjects(subjectsArray);
 
-    const selectedClassId = remedialClassId || bkClassId;
-    let studentQuery = supabase.from("students").select("id, nama, nis, class_id").eq("status", "aktif").order("nama");
-    if (selectedClassId) studentQuery = studentQuery.eq("class_id", selectedClassId);
-    else if (role === "Guru" && classesArray.length > 0) studentQuery = studentQuery.in("class_id", classesArray.map((item) => item.id));
+    // Ambil siswa tanpa filter status agar siswa yang statusnya kosong atau
+    // memakai variasi kapitalisasi tetap muncul di pilihan BK/Remedial.
+    // Filter kelas dilakukan di dropdown berdasarkan kelas pada form masing-masing.
+    let studentQuery = supabase.from("students").select("id, nama, nis, class_id").order("nama");
+    if (role === "Guru" && classesArray.length > 0) {
+      studentQuery = studentQuery.in("class_id", classesArray.map((item) => item.id));
+    }
     const { data: students, error } = await studentQuery;
-    if (!error) setProgramStudents((students ?? []).map((item: any) => ({ id: item.id, nama: item.nama, nis: item.nis ?? "", class_id: item.class_id })));
+    if (error) {
+      console.error(`Gagal memuat daftar siswa untuk ${context}:`, error);
+      setProgramStudents([]);
+    } else {
+      setProgramStudents((students ?? []).map((item: any) => ({ id: item.id, nama: item.nama, nis: item.nis ?? "", class_id: item.class_id })));
+    }
   };
 
   const getCurrentStudentId = async () => {
@@ -4774,7 +4983,7 @@ export default function Home() {
   const loadRemedialData = async () => {
     setRemedialLoading(true);
     setRemedialError("");
-    await loadProgramOptions();
+    await loadProgramOptions("remedial");
     let query = supabase.from("remedial_pengayaan").select(`
       id, student_id, teacher_id, class_id, subject_id, jenis, tanggal, nilai_awal, nilai_hasil, materi, catatan, status,
       students(nama), classes(nama), subjects(nama, kode), profiles!remedial_pengayaan_teacher_id_fkey(nama)
@@ -4842,7 +5051,7 @@ export default function Home() {
   const loadBkData = async () => {
     setBkLoading(true);
     setBkError("");
-    await loadProgramOptions();
+    await loadProgramOptions("bk");
     let query = supabase.from("program_bk").select(`
       id, student_id, guru_id, class_id, tanggal, jenis_program, ringkasan, tindak_lanjut, status,
       students(nama), classes(nama), profiles!program_bk_guru_id_fkey(nama)
@@ -6408,6 +6617,7 @@ export default function Home() {
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button type="button" onClick={() => loadJournalData()} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700">🔎 Tampilkan</button>
                   <button type="button" onClick={openNewJournal} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700">＋ Tambah Jurnal</button>
+                  <button type="button" onClick={() => printSchoolLearningDocument("Jurnal Mengajar", ["No", "Tanggal", "Hari", "Kelas", "Jam", "Tujuan Pembelajaran", "Materi", "Kegiatan", "Catatan"], journalRows.map((row, i) => [i + 1, row.tanggal, new Date(`${row.tanggal}T12:00:00`).toLocaleDateString("id-ID", { weekday: "long" }), row.className, row.jam, row.tujuan_pembelajaran || "-", row.materi_pembelajaran || "-", row.kegiatan, row.catatan || "-"]))} className="rounded-xl border border-emerald-300 bg-white px-4 py-2.5 text-sm font-bold text-emerald-700">🖨️ Cetak / Simpan PDF</button>
                 </div>
               </div>
 
@@ -6432,14 +6642,21 @@ export default function Home() {
 
                   {journalClassId && (
                     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-                      <div className="mb-3"><p className="text-sm font-bold">Siswa yang Tidak Hadir</p><p className="text-xs text-slate-500">Pilih siswa dan keterangan ketidakhadirannya.</p></div>
+                      <div className="mb-3"><p className="text-sm font-bold">Kehadiran Siswa</p><p className="text-xs text-slate-500">Status otomatis mengikuti Absensi Siswa untuk kelas dan tanggal jurnal ini.</p>{journalAttendanceLoading && <p className="mt-1 text-xs text-blue-600">Mengambil data absensi siswa...</p>}</div>
                       <div className="grid gap-2 md:grid-cols-2">
-                        {attendanceStudents.filter((student) => student.classId === journalClassId).map((student) => (
-                          <div key={student.id} className="flex items-center gap-2 rounded-xl bg-slate-50 p-2.5">
-                            <span className="min-w-0 flex-1 truncate text-sm">{student.name}</span>
-                            <select value={journalAbsences[student.id] ?? ""} onChange={(e) => setJournalAbsences((v) => ({ ...v, [student.id]: e.target.value }))} className="rounded-lg border bg-white px-2 py-1.5 text-xs"><option value="">Hadir</option><option value="Sakit">Sakit</option><option value="Izin">Izin</option><option value="Alpa">Alpa</option></select>
-                          </div>
-                        ))}
+                        {attendanceStudents.filter((student) => student.classId === journalClassId).map((student) => {
+                          const attendanceStatus = journalStudentAttendance[student.id];
+                          const savedJournalStatus = journalAbsences[student.id];
+                          const displayStatus = attendanceStatus || savedJournalStatus || "Belum diabsen";
+                          return (
+                            <div key={student.id} className="flex items-center gap-2 rounded-xl bg-slate-50 p-2.5">
+                              <span className="min-w-0 flex-1 truncate text-sm">{student.name}</span>
+                              <span className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold ${displayStatus === "Hadir" ? "bg-emerald-100 text-emerald-700" : displayStatus === "Izin" || displayStatus === "Sakit" ? "bg-amber-100 text-amber-700" : displayStatus === "Alpa" || displayStatus === "Alpa" ? "bg-rose-100 text-rose-700" : "bg-slate-200 text-slate-600"}`}>{displayStatus}</span>
+                            </div>
+                          );
+                        })}
+                        {!attendanceStudents.some((student) => student.classId === journalClassId) && <p className="text-xs text-slate-500">Data siswa untuk kelas ini belum tersedia.</p>}
+                        {!journalAttendanceLoading && Object.keys(journalStudentAttendance).length === 0 && <p className="text-xs text-amber-700">Absensi siswa untuk tanggal ini belum tersedia.</p>}
                       </div>
                     </div>
                   )}
@@ -6471,6 +6688,7 @@ export default function Home() {
                     <div className="min-w-[180px] flex-1"><label className="mb-1 block text-xs font-bold text-slate-600">Mata Pelajaran</label><select value={remedialSubjectId} onChange={(e) => { setRemedialSubjectId(e.target.value); void loadRemedialData(); }} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"><option value="">Semua mapel</option>{programSubjects.map((item) => <option key={item.id} value={item.id}>{item.nama}</option>)}</select></div>
                     <div className="min-w-[160px]"><label className="mb-1 block text-xs font-bold text-slate-600">Jenis</label><select value={remedialTypeFilter} onChange={(e) => { setRemedialTypeFilter(e.target.value); void loadRemedialData(); }} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"><option value="all">Semua</option><option value="remedial">Remedial</option><option value="pengayaan">Pengayaan</option></select></div>
                     <button type="button" onClick={openNewRemedial} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700">＋ Tambah</button>
+                    <button type="button" onClick={() => printSchoolLearningDocument("Program Remedial & Pengayaan", ["No", "Nama Siswa", "Mata Pelajaran", "Tanggal", "Tujuan Pembelajaran", "Rencana Program", "Hasil Sebelum", "Hasil Sesudah"], remedialRows.map((row, i) => [i + 1, row.studentName, row.subjectName, row.tanggal, row.materi || "-", `${row.jenis === "remedial" ? "Remedial" : "Pengayaan"} - ${row.catatan || row.status}`, row.nilai_awal ?? "-", row.nilai_hasil ?? "-"]))} className="rounded-xl border border-amber-300 bg-white px-4 py-2.5 text-sm font-bold text-amber-800">🖨️ Cetak / Simpan PDF</button>
                   </>}
                   {role === "Siswa" && <div><p className="text-sm font-bold text-amber-900">Tindak lanjut hasil belajar</p><p className="text-xs text-amber-800">Data diambil langsung dari guru dan tersinkron dengan akun siswa.</p></div>}
                 </div>
@@ -6502,7 +6720,8 @@ export default function Home() {
 
           {activeMenu === "Program BK" && (
             <Section title="Program BK" subtitle={role === "Siswa" ? "Program pendampingan yang tercatat untuk Anda" : "Catatan program pendampingan siswa"}>
-              <div className="mb-5 rounded-2xl border border-sky-100 bg-sky-50/60 p-4"><div className="flex flex-wrap items-end gap-3">{role !== "Siswa" && <><div className="min-w-[200px] flex-1"><label className="mb-1 block text-xs font-bold text-slate-600">Kelas</label><select value={bkClassId} onChange={(e) => { setBkClassId(e.target.value); setBkForm((v) => ({ ...v, classId: e.target.value, studentId: "" })); void loadBkData(); }} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"><option value="">Semua kelas</option>{programClasses.map((item) => <option key={item.id} value={item.id}>{item.nama}</option>)}</select></div><button type="button" onClick={openNewBk} className="rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-sky-700">＋ Tambah Program</button></>}{role === "Siswa" && <div><p className="text-sm font-bold text-sky-900">Program pendampingan</p><p className="text-xs text-sky-800">Data yang ditampilkan hanya milik akun siswa ini.</p></div>}</div></div>
+              <div className="mb-5 rounded-2xl border border-sky-100 bg-sky-50/60 p-4"><div className="flex flex-wrap items-end gap-3">{role !== "Siswa" && <><div className="min-w-[200px] flex-1"><label className="mb-1 block text-xs font-bold text-slate-600">Kelas</label><select value={bkClassId} onChange={(e) => { setBkClassId(e.target.value); setBkForm((v) => ({ ...v, classId: e.target.value, studentId: "" })); void loadBkData(); }} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"><option value="">Semua kelas</option>{programClasses.map((item) => <option key={item.id} value={item.id}>{item.nama}</option>)}</select></div><button type="button" onClick={openNewBk} className="rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-sky-700">＋ Tambah Program</button>
+                  <button type="button" onClick={() => printSchoolLearningDocument("Laporan Bimbingan Konseling", ["No", "Siswa", "Tanggal", "Bentuk", "Jenis", "Masalah", "Tindak Lanjut"], bkRows.map((row, i) => [i + 1, row.studentName, row.tanggal, "Individu", row.jenis_program, row.ringkasan, row.tindak_lanjut || "-"]))} className="rounded-xl border border-sky-300 bg-white px-4 py-2.5 text-sm font-bold text-sky-700">🖨️ Cetak / Simpan PDF</button></>}{role === "Siswa" && <div><p className="text-sm font-bold text-sky-900">Program pendampingan</p><p className="text-xs text-sky-800">Data yang ditampilkan hanya milik akun siswa ini.</p></div>}</div></div>
               {bkError && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{bkError}</div>}
               {bkFormOpen && role !== "Siswa" && <div className="mb-6 rounded-2xl border border-sky-200 bg-sky-50/40 p-5"><div className="mb-4 flex items-center justify-between"><h3 className="font-bold">{bkEditingId ? "Edit Program BK" : "Tambah Program BK"}</h3><button type="button" onClick={() => setBkFormOpen(false)} className="rounded-xl px-3 py-2 text-sm text-slate-500 hover:bg-white">Tutup</button></div><div className="grid gap-4 md:grid-cols-2"><div><label className="mb-1 block text-xs font-bold">Kelas</label><select value={bkForm.classId} onChange={(e) => setBkForm((v) => ({ ...v, classId: e.target.value, studentId: "" }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"><option value="">Pilih kelas</option>{programClasses.map((item) => <option key={item.id} value={item.id}>{item.nama}</option>)}</select></div><div><label className="mb-1 block text-xs font-bold">Siswa</label><select value={bkForm.studentId} onChange={(e) => setBkForm((v) => ({ ...v, studentId: e.target.value }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"><option value="">Pilih siswa</option>{programStudents.filter((item) => !bkForm.classId || item.class_id === bkForm.classId).map((item) => <option key={item.id} value={item.id}>{item.nama} {item.nis ? `(${item.nis})` : ""}</option>)}</select></div><div><label className="mb-1 block text-xs font-bold">Tanggal</label><input type="date" value={bkForm.tanggal} onChange={(e) => setBkForm((v) => ({ ...v, tanggal: e.target.value }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm" /></div><div><label className="mb-1 block text-xs font-bold">Jenis Program</label><select value={bkForm.jenisProgram} onChange={(e) => setBkForm((v) => ({ ...v, jenisProgram: e.target.value }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"><option>Pendampingan belajar</option><option>Pendampingan perilaku</option><option>Motivasi belajar</option><option>Sosial dan pertemanan</option><option>Lainnya</option></select></div><div className="md:col-span-2"><label className="mb-1 block text-xs font-bold">Ringkasan</label><textarea rows={4} value={bkForm.ringkasan} onChange={(e) => setBkForm((v) => ({ ...v, ringkasan: e.target.value }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm" placeholder="Ringkasan pendampingan yang aman ditampilkan pada akun siswa." /></div><div><label className="mb-1 block text-xs font-bold">Tindak Lanjut</label><textarea rows={3} value={bkForm.tindakLanjut} onChange={(e) => setBkForm((v) => ({ ...v, tindakLanjut: e.target.value }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm" /></div><div><label className="mb-1 block text-xs font-bold">Status</label><select value={bkForm.status} onChange={(e) => setBkForm((v) => ({ ...v, status: e.target.value as "dipantau" | "selesai" }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"><option value="dipantau">Dipantau</option><option value="selesai">Selesai</option></select></div></div><div className="mt-4 flex justify-end gap-2"><button type="button" onClick={() => setBkFormOpen(false)} className="rounded-xl border bg-white px-4 py-2.5 text-sm font-bold">Batal</button><button type="button" onClick={saveBk} disabled={bkSaving} className="rounded-xl bg-sky-600 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">{bkSaving ? "Menyimpan..." : "Simpan"}</button></div></div>}
               <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">{bkLoading ? <div className="p-8 text-center text-sm text-slate-500">Memuat data...</div> : bkRows.length === 0 ? <div className="p-8 text-center text-sm text-slate-500">Belum ada program BK.</div> : <table className="w-full min-w-[900px] text-sm"><thead className="bg-slate-50"><tr><th className="px-3 py-3 text-left">Tanggal</th><th className="px-3 py-3 text-left">Siswa</th><th className="px-3 py-3 text-left">Kelas</th><th className="px-3 py-3 text-left">Program</th><th className="px-3 py-3 text-left">Ringkasan</th><th className="px-3 py-3 text-left">Tindak Lanjut</th><th className="px-3 py-3 text-left">Status</th>{role !== "Siswa" && <th className="px-3 py-3 text-center">Aksi</th>}</tr></thead><tbody>{bkRows.map((row) => <tr key={row.id} className="border-t align-top"><td className="px-3 py-3 whitespace-nowrap">{row.tanggal}</td><td className="px-3 py-3 font-semibold">{row.studentName}</td><td className="px-3 py-3">{row.className}</td><td className="px-3 py-3">{row.jenis_program}</td><td className="px-3 py-3 whitespace-pre-wrap">{row.ringkasan}</td><td className="px-3 py-3 whitespace-pre-wrap">{row.tindak_lanjut || "-"}</td><td className="px-3 py-3">{row.status === "selesai" ? "Selesai" : "Dipantau"}</td>{role !== "Siswa" && <td className="px-3 py-3"><div className="flex justify-center gap-2"><button type="button" onClick={() => openEditBk(row)} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">Edit</button><button type="button" onClick={() => deleteBk(row.id)} className="rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-bold text-red-600">Hapus</button></div></td>}</tr>)}</tbody></table>}</div>
@@ -7466,7 +7685,7 @@ export default function Home() {
                           <>
                           <div className="mb-4 rounded-xl border border-violet-100 bg-violet-50 p-4">
                             <p className="font-bold text-violet-900">Persentase Kehadiran Pegawai — Bulan Berjalan</p>
-                            <p className="mt-1 text-sm text-violet-800">Daftar mencakup semua akun guru, kepala sekolah, dan admin. Persentase dihitung dari hari kerja Senin–Jumat sejak awal bulan sampai hari ini; akun tanpa catatan absensi tetap ditampilkan dengan persentase 0%.</p>
+                            <p className="mt-1 text-sm text-violet-800">Daftar mencakup semua akun guru, kepala sekolah, dan admin. Jumlah hari kerja menampilkan total hari wajib selama satu bulan penuh sesuai jadwal masing-masing guru (pegawai Admin/Kepala Sekolah mengikuti Senin–Jumat). Persentase dihitung dari total hari wajib satu bulan; tanggal mendatang belum dihitung sebagai Alfa.</p>
                           </div>
                           {role === "Admin" && (
                             <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
