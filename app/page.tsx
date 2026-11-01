@@ -57,22 +57,19 @@ function EmployeeQrScanner({ onScan }: { onScan: (token: string) => void }) {
           formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
         });
         await scanner.start(
+          // Biarkan browser memilih resolusi kamera yang paling kompatibel,
+          // terutama pada Safari dan Chrome di iPhone.
           { facingMode: { ideal: "environment" } },
           {
-            fps: 10,
-            // Gunakan kotak deteksi QR yang cukup besar di tengah area kamera portrait.
+            fps: 15,
+            // Area pemindaian dibuat lebih luas agar QR tetap terbaca
+            // meskipun ukuran preview kamera iPhone berbeda-beda.
             qrbox: (width: number, height: number) => {
-              const side = Math.floor(Math.min(width * 0.72, height * 0.48, 240));
-              const safeSide = Math.max(120, side);
+              const side = Math.floor(Math.min(width, height) * 0.78);
+              const safeSide = Math.max(120, Math.min(side, 320, width, height));
               return { width: safeSide, height: safeSide };
             },
-            aspectRatio: 3 / 4,
             disableFlip: true,
-            videoConstraints: {
-              facingMode: { ideal: "environment" },
-              width: { ideal: 1080 },
-              height: { ideal: 1440 },
-            },
           },
           (decodedText) => {
             const token = decodedText.trim();
@@ -109,15 +106,14 @@ function EmployeeQrScanner({ onScan }: { onScan: (token: string) => void }) {
   return (
     <div className="mx-auto w-full min-w-0 max-w-md">
       <style>{`
-        /* Area kamera portrait seperti kartu; jangan menumpuk canvas di atas video
-           karena dapat menutupi preview dan mengganggu area deteksi html5-qrcode. */
-        .employee-qr-camera { position: relative; width: min(100%, 300px); aspect-ratio: 3 / 4; max-width: 100%; margin: 0 auto; overflow: hidden; border-radius: 16px; background: #111827; isolation: isolate; }
-        .employee-qr-camera > div[id^="employee-qr-reader"] { position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; min-height: 0 !important; border: 0 !important; overflow: hidden !important; }
-        .employee-qr-camera [id$="__scan_region"] { position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; min-height: 0 !important; border: 0 !important; overflow: hidden !important; }
-        .employee-qr-camera [id$="__scan_region"] video, .employee-qr-camera video { position: absolute !important; inset: 0 !important; display: block !important; width: 100% !important; height: 100% !important; max-width: none !important; object-fit: cover !important; border-radius: 16px !important; }
+        /* Jangan paksa ukuran/posisi video internal: html5-qrcode perlu
+           mempertahankan koordinat asli agar area deteksi sesuai dengan kamera. */
+        .employee-qr-camera { position: relative; width: min(100%, 360px); max-width: 100%; margin: 0 auto; overflow: hidden; border-radius: 16px; background: #111827; isolation: isolate; }
+        .employee-qr-camera > div[id^="employee-qr-reader"] { width: 100% !important; min-height: 0 !important; border: 0 !important; overflow: hidden !important; }
+        .employee-qr-camera video { display: block !important; max-width: 100% !important; height: auto !important; object-fit: contain !important; border-radius: 16px !important; }
         .employee-qr-camera canvas { max-width: 100% !important; }
-        .employee-qr-camera [id$="__scan_region"] img, .employee-qr-camera [id$="__dashboard"] { display: none !important; }
-        .employee-qr-scan-frame { position:absolute; z-index:20; inset:12%; border:2px solid rgba(45,212,191,.95); border-radius:18px; pointer-events:none; box-shadow:0 0 0 999px rgba(2,6,23,.12),0 0 22px rgba(45,212,191,.3); }
+        .employee-qr-camera [id$="__dashboard"] { display: none !important; }
+        .employee-qr-scan-frame { position:absolute; z-index:20; inset:10%; border:2px solid rgba(45,212,191,.95); border-radius:18px; pointer-events:none; box-shadow:0 0 0 999px rgba(2,6,23,.12),0 0 22px rgba(45,212,191,.3); }
         .employee-qr-scan-line { position:absolute; z-index:21; left:4%; right:4%; height:3px; top:8%; border-radius:999px; background:#5eead4; box-shadow:0 0 12px 3px rgba(45,212,191,.7); animation:employee-qr-scan 2.2s ease-in-out infinite alternate; }
         .employee-qr-scan-frame:after { content:""; position:absolute; inset:0; border-radius:16px; background:linear-gradient(180deg,transparent,rgba(45,212,191,.10),transparent); animation:employee-qr-pulse 2s ease-in-out infinite; }
         @keyframes employee-qr-scan { from{top:8%} to{top:90%} }
@@ -129,7 +125,7 @@ function EmployeeQrScanner({ onScan }: { onScan: (token: string) => void }) {
           {scanState === "success" ? "QR berhasil dibaca" : scanState === "starting" ? "Menyiapkan kamera…" : "Arahkan QR kartu ke kamera"}
         </p>
         <p className="mt-1 text-xs leading-5 text-slate-500">
-          Posisikan satu QR di tengah kotak. Pastikan QR tajam, tidak silau, dan seluruh pola QR terlihat.
+          Posisikan satu QR di tengah kamera, jaga jarak sekitar 10–20 cm, dan pastikan seluruh pola QR terlihat tajam tanpa silau.
         </p>
       </div>
       <div className="employee-qr-camera">
