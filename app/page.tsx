@@ -5,18 +5,8 @@ import { QRCodeSVG } from "qrcode.react";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { supabase } from "@/lib/supabase";
 
-async function safelyStopAndClearScanner(scanner: Html5Qrcode) {
-  try {
-    if (scanner.isScanning) await scanner.stop();
-  } catch {
-    // Kamera mungkin sudah berhenti atau belum selesai mulai.
-  }
-  try {
-    scanner.clear();
-  } catch {
-    // Elemen reader mungkin sudah dibersihkan.
-  }
-}
+// Menjaga proses start kamera agar tidak bertumpuk saat komponen dipasang ulang.
+let employeeQrStartQueue: Promise<void> = Promise.resolve();
 
 function EmployeeQrScanner({ onScan }: { onScan: (token: string) => void }) {
   const generatedId = useId();
@@ -30,43 +20,43 @@ function EmployeeQrScanner({ onScan }: { onScan: (token: string) => void }) {
   useEffect(() => {
     let cancelled = false;
     let decoded = false;
-    let startFinished = false;
-    let cleanupAfterStart = false;
     let scanner: Html5Qrcode | null = null;
+    let startFinished = false;
 
-    const cleanup = async () => {
-      if (!scanner) return;
-      // html5-qrcode may still be creating its video while start() is pending.
-      if (!startFinished) {
-        cleanupAfterStart = true;
-        return;
-      }
+    const stopScanner = async () => {
+      if (!scanner || !startFinished) return;
       try {
         if (scanner.isScanning) await scanner.stop();
-      } catch { /* Camera may already be stopped. */ }
-      try { scanner.clear(); } catch { /* Reader may already be cleared. */ }
+      } catch {
+        // Kamera mungkin sudah berhenti.
+      }
+      try {
+        scanner.clear();
+      } catch {
+        // Elemen reader mungkin sudah dibersihkan.
+      }
     };
 
-    const start = async () => {
+    const startScanner = async () => {
+      if (cancelled) return;
       const element = document.getElementById(readerId);
-      if (!element || cancelled) return;
+      if (!element) return;
+
       try {
         element.replaceChildren();
         scanner = new Html5Qrcode(readerId, {
           verbose: false,
           formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
         });
+
         await scanner.start(
-          // Biarkan browser memilih resolusi kamera yang paling kompatibel,
-          // terutama pada Safari dan Chrome di iPhone.
-          { facingMode: { ideal: "environment" } },
+          // Bentuk constraint standar html5-qrcode; browser memilih kamera belakang.
+          { facingMode: "environment" },
           {
-            fps: 15,
-            // Area pemindaian dibuat lebih luas agar QR tetap terbaca
-            // meskipun ukuran preview kamera iPhone berbeda-beda.
+            fps: 10,
             qrbox: (width: number, height: number) => {
-              const side = Math.floor(Math.min(width, height) * 0.78);
-              const safeSide = Math.max(120, Math.min(side, 320, width, height));
+              const side = Math.max(100, Math.floor(Math.min(width, height) * 0.7));
+              const safeSide = Math.min(side, width, height);
               return { width: safeSide, height: safeSide };
             },
             disableFlip: true,
@@ -77,13 +67,16 @@ function EmployeeQrScanner({ onScan }: { onScan: (token: string) => void }) {
             decoded = true;
             setScanState("success");
             onScanRef.current(token);
-            void cleanup();
+            void stopScanner();
           },
-          () => { /* Keep scanning until a QR is recognized. */ },
+          () => {
+            // Tetap memindai sampai QR dikenali.
+          },
         );
+
         startFinished = true;
-        if (cancelled || cleanupAfterStart) {
-          await cleanup();
+        if (cancelled) {
+          await stopScanner();
         } else {
           setScanState("scanning");
         }
@@ -92,25 +85,34 @@ function EmployeeQrScanner({ onScan }: { onScan: (token: string) => void }) {
         if (!cancelled) {
           setCameraError(error instanceof Error ? error.message : "Kamera tidak dapat dibuka. Periksa izin kamera browser.");
         }
-        try { scanner?.clear(); } catch { /* Reader may not have initialized. */ }
+        try {
+          scanner?.clear();
+        } catch {
+          // Reader mungkin belum selesai dibuat.
+        }
       }
     };
 
-    void start();
+    // Serialisasi mencegah dua permintaan kamera berjalan bersamaan saat
+    // React memasang ulang komponen dengan cepat.
+    const queuedStart = employeeQrStartQueue.then(startScanner, startScanner);
+    employeeQrStartQueue = queuedStart.then(() => undefined, () => undefined);
+
     return () => {
       cancelled = true;
-      void cleanup();
+      if (startFinished) void stopScanner();
+      // Jika start masih berlangsung, startScanner akan menghentikan kamera
+      // segera setelah proses start selesai.
     };
   }, [readerId]);
 
   return (
     <div className="mx-auto w-full min-w-0 max-w-md">
       <style>{`
-        /* Jangan paksa ukuran/posisi video internal: html5-qrcode perlu
-           mempertahankan koordinat asli agar area deteksi sesuai dengan kamera. */
         .employee-qr-camera { position: relative; width: min(100%, 360px); max-width: 100%; margin: 0 auto; overflow: hidden; border-radius: 16px; background: #111827; isolation: isolate; }
         .employee-qr-camera > div[id^="employee-qr-reader"] { width: 100% !important; min-height: 0 !important; border: 0 !important; overflow: hidden !important; }
-        .employee-qr-camera video { display: block !important; max-width: 100% !important; height: auto !important; object-fit: contain !important; border-radius: 16px !important; }
+        /* Biarkan html5-qrcode mengatur ukuran video dan canvas sesuai perangkat. */
+        .employee-qr-camera video { display: block !important; max-width: 100% !important; border-radius: 16px !important; }
         .employee-qr-camera canvas { max-width: 100% !important; }
         .employee-qr-camera [id$="__dashboard"] { display: none !important; }
         .employee-qr-scan-frame { position:absolute; z-index:20; inset:10%; border:2px solid rgba(45,212,191,.95); border-radius:18px; pointer-events:none; box-shadow:0 0 0 999px rgba(2,6,23,.12),0 0 22px rgba(45,212,191,.3); }
@@ -961,7 +963,7 @@ export default function Home() {
   });
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [attendancePanel, setAttendancePanel] = useState<"menu" | "siswa" | "guru" | "rekap-guru" | "rekap-siswa" | "qr-pegawai" | "scan-qr">("menu");
-  const [teacherAttendanceRows, setTeacherAttendanceRows] = useState<(TeacherAttendanceToday & { guru_id: string; nama_guru: string; role_label: string; attendancePercentage: number; attendedWorkdays: number; workdaysElapsed: number })[]>([]);
+  const [teacherAttendanceRows, setTeacherAttendanceRows] = useState<(TeacherAttendanceToday & { guru_id: string; nama_guru: string; role_label: string; attendancePercentage: number; attendedWorkdays: number; workdaysElapsed: number; status?: string; izinDays: number; sakitDays: number; alfaDays: number })[]>([]);
   const [teacherAttendanceReportLoading, setTeacherAttendanceReportLoading] = useState(false);
   const [employeeQrRows, setEmployeeQrRows] = useState<{ profile_id: string; qr_token: string; is_active: boolean; nama: string; role: string; foto_url: string | null }[]>([]);
   const [ownEmployeeQr, setOwnEmployeeQr] = useState<{ qr_token: string; is_active: boolean } | null>(null);
@@ -993,6 +995,7 @@ export default function Home() {
     latitude_pulang?: number | null;
     longitude_pulang?: number | null;
     alamat_pulang?: string | null;
+    status?: "hadir" | "izin" | "sakit" | "alfa";
   };
   const [teacherAttendanceToday, setTeacherAttendanceToday] = useState<TeacherAttendanceToday | null>(null);
   const [teacherAttendanceMode, setTeacherAttendanceMode] = useState<"masuk" | "pulang">("masuk");
@@ -1005,6 +1008,10 @@ export default function Home() {
   const [attendanceDate, setAttendanceDate] = useState(todayDateString);
   const [selectedPdfAttendanceDate, setSelectedPdfAttendanceDate] = useState(todayDateString);
   const [selectedPdfAttendanceMonth, setSelectedPdfAttendanceMonth] = useState(todayDateString.slice(0, 7));
+  const [selectedTeacherStatusProfile, setSelectedTeacherStatusProfile] = useState("");
+  const [selectedTeacherStatusDate, setSelectedTeacherStatusDate] = useState(todayDateString);
+  const [selectedTeacherStatus, setSelectedTeacherStatus] = useState<"izin" | "sakit" | "alfa">("izin");
+  const [teacherStatusSaving, setTeacherStatusSaving] = useState(false);
   const [attendanceMonth, setAttendanceMonth] = useState(today.getMonth());
   const [attendanceYear] = useState(today.getFullYear());
   const [attendanceRecords, setAttendanceRecords] = useState<Record<string, AttendanceStatus>>({});
@@ -3249,7 +3256,7 @@ export default function Home() {
 
     const { data, error } = await supabase
       .from("teacher_attendance")
-      .select("id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang, latitude_masuk, longitude_masuk, alamat_masuk, latitude_pulang, longitude_pulang, alamat_pulang")
+      .select("id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang, latitude_masuk, longitude_masuk, alamat_masuk, latitude_pulang, longitude_pulang, alamat_pulang, status")
       .eq("guru_id", currentUserId)
       .eq("tanggal", attendanceDate)
       .maybeSingle();
@@ -3341,7 +3348,7 @@ export default function Home() {
       const [{ data: profiles, error: profileError }, { data: attendanceData, error: attendanceError }] = await Promise.all([
         supabase.from("profiles").select("id, nama, role").in("role", ["guru", "admin", "kepala_sekolah"]),
         supabase.from("teacher_attendance")
-          .select("id, guru_id, tanggal, jam_masuk, jam_pulang, latitude_masuk, longitude_masuk, alamat_masuk")
+          .select("id, guru_id, tanggal, jam_masuk, jam_pulang, latitude_masuk, longitude_masuk, alamat_masuk, status")
           .gte("tanggal", monthStart).lte("tanggal", reportDate).order("tanggal", { ascending: true }),
       ]);
       if (profileError) throw profileError;
@@ -3364,15 +3371,19 @@ export default function Home() {
       const rows = sortedProfiles.map((profile: any, index: number) => {
         const records = (attendanceData ?? []).filter((item: any) => item.guru_id === profile.id);
         const todayRecord = records.find((item: any) => item.tanggal === reportDate);
-        const presentDates = new Set(records.filter((item: any) => Boolean(item.jam_masuk) && workDates.includes(item.tanggal)).map((item: any) => item.tanggal));
+        const presentDates = new Set(records.filter((item: any) => (item.status ?? "hadir") === "hadir" && Boolean(item.jam_masuk) && workDates.includes(item.tanggal)).map((item: any) => item.tanggal));
         const percentage = workDates.length ? Math.round((presentDates.size / workDates.length) * 100) : 0;
-        let status = "Tidak hadir";
+        let status = "Alfa";
         let statusClass = "absent";
-        if (todayRecord?.jam_masuk) {
+        const savedStatus = String(todayRecord?.status ?? "hadir").toLowerCase();
+        if (savedStatus === "izin") { status = "Izin"; statusClass = "absent"; }
+        else if (savedStatus === "sakit") { status = "Sakit"; statusClass = "absent"; }
+        else if (savedStatus === "alfa") { status = "Alfa"; statusClass = "absent"; }
+        else if (todayRecord?.jam_masuk) {
           const time = new Date(todayRecord.jam_masuk).toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false });
           if (time <= "06:30") { status = "Hadir · Tepat waktu"; statusClass = "ontime"; }
           else { status = "Hadir · Terlambat"; statusClass = "late"; }
-        }
+        } else if (todayRecord) { status = "Hadir"; statusClass = "ontime"; }
         return `<tr><td class="center">${index + 1}</td><td>${esc(profile.nama ?? "Nama belum diatur")}</td><td>${esc(roleLabels[String(profile.role ?? "").toLowerCase()] ?? profile.role ?? "Pegawai")}</td><td class="center">${todayRecord?.jam_masuk ? esc(new Date(todayRecord.jam_masuk).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false })) : "—"}</td><td class="status ${statusClass}">${status}</td><td class="center">${todayRecord?.jam_pulang ? esc(new Date(todayRecord.jam_pulang).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false })) : "—"}</td><td class="center">${percentage}%</td><td>${todayRecord?.alamat_masuk || todayRecord?.latitude_masuk != null || todayRecord?.longitude_masuk != null ? "GPS tercatat" : "Belum ada data GPS"}</td></tr>`;
       }).join("");
 
@@ -3414,7 +3425,7 @@ export default function Home() {
       const monthLabel = new Date(`${monthStart}T12:00:00+07:00`).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", month: "long", year: "numeric" });
       const [{ data: profiles, error: profileError }, { data: attendanceData, error: attendanceError }] = await Promise.all([
         supabase.from("profiles").select("id, nama, role").in("role", ["guru", "admin", "kepala_sekolah"]),
-        supabase.from("teacher_attendance").select("id, guru_id, tanggal, jam_masuk, jam_pulang").gte("tanggal", monthStart).lte("tanggal", reportEndDate).order("tanggal", { ascending: true }),
+        supabase.from("teacher_attendance").select("id, guru_id, tanggal, jam_masuk, jam_pulang, status").gte("tanggal", monthStart).lte("tanggal", reportEndDate).order("tanggal", { ascending: true }),
       ]);
       if (profileError) throw profileError;
       if (attendanceError) throw attendanceError;
@@ -3430,17 +3441,21 @@ export default function Home() {
         return (order[String(a.role).toLowerCase()] ?? 3) - (order[String(b.role).toLowerCase()] ?? 3) || String(a.nama ?? "").localeCompare(String(b.nama ?? ""), "id");
       });
       const rows = sortedProfiles.map((profile: any, index: number) => {
-        const records = (attendanceData ?? []).filter((item: any) => item.guru_id === profile.id && Boolean(item.jam_masuk) && workDates.includes(item.tanggal));
-        const presentDates = new Set(records.map((item: any) => item.tanggal));
-        const onTime = records.filter((item: any) => new Date(item.jam_masuk).toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }) <= "06:30").length;
-        const late = records.length - onTime;
-        const absent = Math.max(0, workDates.length - presentDates.size);
+        const records = (attendanceData ?? []).filter((item: any) => item.guru_id === profile.id && workDates.includes(item.tanggal));
+        const presentRecords = records.filter((item: any) => (item.status ?? "hadir") === "hadir" && Boolean(item.jam_masuk));
+        const presentDates = new Set(presentRecords.map((item: any) => item.tanggal));
+        const onTime = presentRecords.filter((item: any) => new Date(item.jam_masuk).toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }) <= "06:30").length;
+        const late = presentRecords.length - onTime;
+        const izin = records.filter((item: any) => item.status === "izin").length;
+        const sakit = records.filter((item: any) => item.status === "sakit").length;
+        const alfa = records.filter((item: any) => item.status === "alfa" || (!item.status && !item.jam_masuk)).length;
+        const unrecorded = Math.max(0, workDates.length - presentDates.size - izin - sakit - alfa);
         const percentage = workDates.length ? Math.round((presentDates.size / workDates.length) * 100) : 0;
-        return `<tr><td class="center">${index + 1}</td><td>${esc(profile.nama ?? "Nama belum diatur")}</td><td>${esc(roleLabels[String(profile.role ?? "").toLowerCase()] ?? profile.role ?? "Pegawai")}</td><td class="center">${presentDates.size}</td><td class="center ontime">${onTime}</td><td class="center late">${late}</td><td class="center absent">${absent}</td><td class="center"><b>${percentage}%</b></td></tr>`;
+        return `<tr><td class="center">${index + 1}</td><td>${esc(profile.nama ?? "Nama belum diatur")}</td><td>${esc(roleLabels[String(profile.role ?? "").toLowerCase()] ?? profile.role ?? "Pegawai")}</td><td class="center">${presentDates.size}</td><td class="center ontime">${onTime}</td><td class="center late">${late}</td><td class="center">${izin}</td><td class="center">${sakit}</td><td class="center absent">${alfa + unrecorded}</td><td class="center"><b>${percentage}%</b></td></tr>`;
       }).join("");
       const title = `Rekap Absensi Pegawai Bulanan — ${monthLabel}`;
       printWindow.document.open();
-      printWindow.document.write(`<!doctype html><html><head><meta charset="UTF-8"><title>${esc(title)}</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:10px}h1{font-size:19px;margin:0 0 5px}h2{font-size:14px;margin:0 0 6px}p{margin:4px 0 12px;color:#444;font-size:10px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #cbd5e1;padding:7px 6px;text-align:left}th{background:#e2e8f0;font-size:10px}td{font-size:10px}.center{text-align:center}.ontime{color:#166534;background:#dcfce7}.late{color:#991b1b;background:#fee2e2}.absent{color:#475569;background:#f1f5f9}.note{margin-top:10px;font-size:9px;color:#475569}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><h1>${esc(schoolSettings.namaSekolah || "SD Islam Al-Barkah")}</h1><h2>Rekap Absensi Pegawai Bulanan</h2><p>Bulan laporan: <b>${esc(monthLabel)}</b> · Hari kerja Senin–Jumat sampai tanggal ${esc(new Date(`${reportEndDate}T12:00:00+07:00`).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" }))}. Batas tepat waktu: 06.30 WIB.</p><table><thead><tr><th style="width:5%">No.</th><th style="width:24%">Nama Pegawai</th><th style="width:18%">Jabatan</th><th style="width:10%">Hari Hadir</th><th style="width:12%">Tepat Waktu</th><th style="width:12%">Terlambat</th><th style="width:10%">Tidak Hadir</th><th style="width:9%">Persentase</th></tr></thead><tbody>${rows}</tbody></table><div class="note">Hijau: tepat waktu (pukul 06.30 WIB atau sebelumnya). Merah: terlambat (setelah 06.30 WIB). Abu-abu: tidak hadir. Persentase = hari hadir ÷ hari kerja pada periode laporan. Rekap otomatis dihitung dari data absensi yang tersimpan.</div><script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250)};</script></body></html>`);
+      printWindow.document.write(`<!doctype html><html><head><meta charset="UTF-8"><title>${esc(title)}</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:10px}h1{font-size:19px;margin:0 0 5px}h2{font-size:14px;margin:0 0 6px}p{margin:4px 0 12px;color:#444;font-size:10px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #cbd5e1;padding:7px 6px;text-align:left}th{background:#e2e8f0;font-size:10px}td{font-size:10px}.center{text-align:center}.ontime{color:#166534;background:#dcfce7}.late{color:#991b1b;background:#fee2e2}.absent{color:#475569;background:#f1f5f9}.note{margin-top:10px;font-size:9px;color:#475569}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><h1>${esc(schoolSettings.namaSekolah || "SD Islam Al-Barkah")}</h1><h2>Rekap Absensi Pegawai Bulanan</h2><p>Bulan laporan: <b>${esc(monthLabel)}</b> · Hari kerja Senin–Jumat sampai tanggal ${esc(new Date(`${reportEndDate}T12:00:00+07:00`).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" }))}. Batas tepat waktu: 06.30 WIB.</p><table><thead><tr><th style="width:5%">No.</th><th style="width:24%">Nama Pegawai</th><th style="width:18%">Jabatan</th><th style="width:10%">Hari Hadir</th><th style="width:12%">Tepat Waktu</th><th style="width:9%">Terlambat</th><th style="width:8%">Izin</th><th style="width:8%">Sakit</th><th style="width:9%">Alfa / Belum tercatat</th><th style="width:8%">Persentase</th></tr></thead><tbody>${rows}</tbody></table><div class="note">Hijau: tepat waktu (pukul 06.30 WIB atau sebelumnya). Merah: terlambat (setelah 06.30 WIB). Abu-abu: tidak hadir. Persentase = hari hadir ÷ hari kerja pada periode laporan. Rekap otomatis dihitung dari data absensi yang tersimpan.</div><script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250)};</script></body></html>`);
       printWindow.document.close();
     } catch (error) {
       const message = String(error instanceof Error ? error.message : "Terjadi kesalahan.");
@@ -3458,7 +3473,7 @@ export default function Home() {
         supabase.from("profiles").select("id, nama, role").in("role", ["guru", "admin", "kepala_sekolah"]),
         supabase
           .from("teacher_attendance")
-          .select("id, guru_id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang, latitude_masuk, longitude_masuk, alamat_masuk, latitude_pulang, longitude_pulang, alamat_pulang")
+          .select("id, guru_id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang, latitude_masuk, longitude_masuk, alamat_masuk, latitude_pulang, longitude_pulang, alamat_pulang, status")
           .order("tanggal", { ascending: false }),
       ]);
       if (profileError) throw profileError;
@@ -3481,7 +3496,10 @@ export default function Home() {
       };
       const reportRows = (profiles ?? []).map((profile: any) => {
         const personRecords = rows.filter((item: any) => item.guru_id === profile.id && item.tanggal >= monthStart && item.tanggal <= jakartaToday);
-        const attendedDates = new Set(personRecords.filter((item: any) => Boolean(item.jam_masuk) && workDates.includes(item.tanggal)).map((item: any) => item.tanggal));
+        const attendedDates = new Set(personRecords.filter((item: any) => (item.status ?? "hadir") === "hadir" && Boolean(item.jam_masuk) && workDates.includes(item.tanggal)).map((item: any) => item.tanggal));
+        const izinDays = personRecords.filter((item: any) => item.status === "izin" && workDates.includes(item.tanggal)).length;
+        const sakitDays = personRecords.filter((item: any) => item.status === "sakit" && workDates.includes(item.tanggal)).length;
+        const alfaDays = personRecords.filter((item: any) => item.status === "alfa" && workDates.includes(item.tanggal)).length;
         const latestRecord = personRecords[0];
         const attendedWorkdays = attendedDates.size;
         const attendancePercentage = workDates.length ? Math.round((attendedWorkdays / workDates.length) * 100) : 0;
@@ -3501,6 +3519,10 @@ export default function Home() {
           latitude_pulang: latestRecord?.latitude_pulang ?? null,
           longitude_pulang: latestRecord?.longitude_pulang ?? null,
           alamat_pulang: latestRecord?.alamat_pulang ?? null,
+          status: latestRecord?.status ?? "hadir",
+          izinDays,
+          sakitDays,
+          alfaDays,
           attendancePercentage,
           attendedWorkdays,
           workdaysElapsed: workDates.length,
@@ -3515,6 +3537,33 @@ export default function Home() {
       setTeacherAttendanceReportError(message);
     } finally {
       setTeacherAttendanceReportLoading(false);
+    }
+  };
+
+  const saveTeacherAttendanceStatus = async () => {
+    if (role !== "Admin") {
+      alert("Hanya Admin yang dapat mencatat status Izin, Sakit, atau Alfa.");
+      return;
+    }
+    if (!selectedTeacherStatusProfile || !selectedTeacherStatusDate) {
+      alert("Pilih nama pegawai dan tanggal terlebih dahulu.");
+      return;
+    }
+    setTeacherStatusSaving(true);
+    try {
+      const { error } = await supabase.from("teacher_attendance").upsert({
+        guru_id: selectedTeacherStatusProfile,
+        tanggal: selectedTeacherStatusDate,
+        status: selectedTeacherStatus,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "guru_id,tanggal" });
+      if (error) throw error;
+      await loadTeacherAttendanceReport();
+      alert(`Status ${selectedTeacherStatus.toUpperCase()} berhasil disimpan.`);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Gagal menyimpan status absensi.");
+    } finally {
+      setTeacherStatusSaving(false);
     }
   };
 
@@ -3734,7 +3783,7 @@ export default function Home() {
         const { data, error } = await supabase
           .from("teacher_attendance")
           .upsert({ guru_id: currentUserId, tanggal: attendanceDate, jam_masuk: timestamp, ...locationFields }, { onConflict: "guru_id,tanggal" })
-          .select("id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang, latitude_masuk, longitude_masuk, alamat_masuk, latitude_pulang, longitude_pulang, alamat_pulang")
+          .select("id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang, latitude_masuk, longitude_masuk, alamat_masuk, latitude_pulang, longitude_pulang, alamat_pulang, status")
           .single();
         if (error) throw new Error(`Absen masuk gagal disimpan: ${error.message}`);
         setTeacherAttendanceToday(data);
@@ -3749,7 +3798,7 @@ export default function Home() {
           .update({ jam_pulang: timestamp, updated_at: timestamp, ...locationFields })
           .eq("id", teacherAttendanceToday?.id ?? "")
           .is("jam_pulang", null)
-          .select("id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang, latitude_masuk, longitude_masuk, alamat_masuk, latitude_pulang, longitude_pulang, alamat_pulang")
+          .select("id, tanggal, jam_masuk, selfie_masuk, jam_pulang, selfie_pulang, latitude_masuk, longitude_masuk, alamat_masuk, latitude_pulang, longitude_pulang, alamat_pulang, status")
           .single();
         if (error) throw new Error(`Absen pulang gagal disimpan: ${error.message}`);
         setTeacherAttendanceToday(data);
@@ -7373,6 +7422,7 @@ export default function Home() {
                           <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-5">
                             <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">Absen Masuk</p>
                             <p className="mt-1 font-bold text-gray-900">{teacherAttendanceToday?.jam_masuk ? "Sudah absen" : "Belum absen"}</p>
+                            {teacherAttendanceToday?.status && teacherAttendanceToday.status !== "hadir" && <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Status hari ini: {teacherAttendanceToday.status.toUpperCase()}</p>}
                             {teacherAttendanceToday?.jam_masuk ? <div className="mt-4 rounded-xl bg-white p-4"><p className="text-xs text-gray-500">Jam masuk</p><p className="mt-1 text-2xl font-black text-emerald-700">{new Date(teacherAttendanceToday.jam_masuk).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB</p><p className="mt-2 text-xs text-gray-600">{teacherAttendanceToday.alamat_masuk || "Alamat belum tersedia"}</p></div> : <button type="button" onClick={() => { setTeacherAttendanceMode("masuk"); setOwnQrScannerMessage(""); if (!ownEmployeeQr?.is_active || !ownEmployeeQr.qr_token) { setOwnQrScannerMessage("QR pribadi belum tersedia. Minta admin membuat QR pegawai terlebih dahulu."); return; } setOwnQrScannerOpen(true); }} disabled={attendanceSaving || ownEmployeeQrLoading} className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">{locationChecking && teacherAttendanceMode === "masuk" ? "Menyimpan absensi..." : "📷 Scan QR & Absen Masuk"}</button>}
                           </div>
                           <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-5">
@@ -7418,9 +7468,32 @@ export default function Home() {
                             <p className="font-bold text-violet-900">Persentase Kehadiran Pegawai — Bulan Berjalan</p>
                             <p className="mt-1 text-sm text-violet-800">Daftar mencakup semua akun guru, kepala sekolah, dan admin. Persentase dihitung dari hari kerja Senin–Jumat sejak awal bulan sampai hari ini; akun tanpa catatan absensi tetap ditampilkan dengan persentase 0%.</p>
                           </div>
+                          {role === "Admin" && (
+                            <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                              <h4 className="font-bold text-amber-900">Catat Status Absensi Pegawai</h4>
+                              <p className="mt-1 text-xs text-amber-800">Gunakan bagian ini untuk mencatat Izin, Sakit, atau Alfa berdasarkan laporan yang diterima Admin. Status Hadir tetap tercatat melalui absensi QR.</p>
+                              <div className="mt-3 grid gap-3 sm:grid-cols-4">
+                                <label className="flex flex-col gap-1 text-xs font-semibold text-gray-700">Nama pegawai
+                                  <select value={selectedTeacherStatusProfile} onChange={(e) => setSelectedTeacherStatusProfile(e.target.value)} className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm">
+                                    <option value="">Pilih pegawai</option>
+                                    {teacherAttendanceRows.map((row) => <option key={row.guru_id} value={row.guru_id}>{row.nama_guru} — {row.role_label}</option>)}
+                                  </select>
+                                </label>
+                                <label className="flex flex-col gap-1 text-xs font-semibold text-gray-700">Tanggal
+                                  <input type="date" value={selectedTeacherStatusDate} max={todayDateString} onChange={(e) => setSelectedTeacherStatusDate(e.target.value)} className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm" />
+                                </label>
+                                <label className="flex flex-col gap-1 text-xs font-semibold text-gray-700">Status
+                                  <select value={selectedTeacherStatus} onChange={(e) => setSelectedTeacherStatus(e.target.value as "izin" | "sakit" | "alfa")} className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm">
+                                    <option value="izin">Izin</option><option value="sakit">Sakit</option><option value="alfa">Alfa</option>
+                                  </select>
+                                </label>
+                                <div className="flex items-end"><button type="button" disabled={teacherStatusSaving || !selectedTeacherStatusProfile} onClick={() => void saveTeacherAttendanceStatus()} className="w-full rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50">{teacherStatusSaving ? "Menyimpan..." : "Simpan Status"}</button></div>
+                              </div>
+                            </div>
+                          )}
                           <div className="overflow-x-auto">
-                            <table className="w-full min-w-[620px] border-collapse text-left text-sm">
-                              <thead><tr className="border-b bg-slate-50 text-xs uppercase text-slate-500"><th className="p-3">No.</th><th className="p-3">Nama Pegawai</th><th className="p-3">Jabatan</th><th className="p-3">Hari Hadir</th><th className="p-3">Persentase Kehadiran</th></tr></thead>
+                            <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+                              <thead><tr className="border-b bg-slate-50 text-xs uppercase text-slate-500"><th className="p-3">No.</th><th className="p-3">Nama Pegawai</th><th className="p-3">Jabatan</th><th className="p-3">Hadir</th><th className="p-3">Izin</th><th className="p-3">Sakit</th><th className="p-3">Alfa</th><th className="p-3">Persentase Kehadiran</th></tr></thead>
                               <tbody>
                                 {teacherAttendanceRows.map((row, index) => (
                                   <tr key={row.guru_id} className="border-b border-slate-100">
@@ -7428,6 +7501,7 @@ export default function Home() {
                                     <td className="p-3 font-semibold text-gray-900">{row.nama_guru}</td>
                                     <td className="p-3">{row.role_label}</td>
                                     <td className="p-3">{row.attendedWorkdays}/{row.workdaysElapsed} hari kerja</td>
+                                    <td className="p-3">{row.izinDays}</td><td className="p-3">{row.sakitDays}</td><td className="p-3">{row.alfaDays}</td>
                                     <td className="p-3"><span className="font-bold text-violet-700">{row.attendancePercentage}%</span><div className="mt-2 h-2 w-28 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-violet-600" style={{ width: `${row.attendancePercentage}%` }} /></div></td>
                                   </tr>
                                 ))}
