@@ -176,7 +176,7 @@ const ATTENDANCE_GPS_TEST_MODE = false;
 // Guru yang tidak tercantum mengikuti jadwal umum Senin–Jumat.
 const TEACHER_ATTENDANCE_SCHEDULE: Record<string, { days: number[]; thursdayCutoff?: string }> = {
   "sofian": { days: [2, 3] },
-  "niky komala dewi s pd": { days: [2, 4, 5], thursdayCutoff: "08:50" },
+  "niky komala dewi s pd": { days: [2, 4, 5], thursdayCutoff: "09:45" },
   "sumiati": { days: [1, 2, 3, 4, 5] },
   "indra priadi": { days: [1, 2, 3, 4, 5] },
   "annisa fauzi": { days: [2, 3, 4] },
@@ -186,7 +186,7 @@ const TEACHER_ATTENDANCE_SCHEDULE: Record<string, { days: number[]; thursdayCuto
   "ihsan fauzan": { days: [1, 2, 3, 4, 5] },
   "ceng imam qusaeri s pd": { days: [1, 2, 3, 4, 5] },
   "eggi gismanto s pd": { days: [3] },
-  "siti mutiara": { days: [1, 2, 4, 5] },
+  "siti mutiara": { days: [3, 4, 5] },
   "fawaz naufal s h": { days: [1, 2, 3, 4, 5] },
   "yopi irawan": { days: [3, 4, 5] },
   "faisal akbar yusuf s pd": { days: [1, 2, 3, 4, 5] },
@@ -3539,7 +3539,7 @@ export default function Home() {
       const monthLabel = new Date(`${monthStart}T12:00:00+07:00`).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", month: "long", year: "numeric" });
       const [{ data: profiles, error: profileError }, { data: attendanceData, error: attendanceError }] = await Promise.all([
         supabase.from("profiles").select("id, nama, role").in("role", ["guru", "admin", "kepala_sekolah"]),
-        supabase.from("teacher_attendance").select("id, guru_id, tanggal, jam_masuk, jam_pulang, status").gte("tanggal", monthStart).lte("tanggal", reportEndDate).order("tanggal", { ascending: true }),
+        supabase.from("teacher_attendance").select("id, guru_id, tanggal, jam_masuk, jam_pulang, latitude_masuk, longitude_masuk, alamat_masuk, status").gte("tanggal", monthStart).lte("tanggal", reportEndDate).order("tanggal", { ascending: true }),
       ]);
       if (profileError) throw profileError;
       if (attendanceError) throw attendanceError;
@@ -3557,7 +3557,7 @@ export default function Home() {
           // setelah batas absensi pegawai tersebut terlewati (WIB).
           if (date < today) elapsedWorkDates.push(date);
           else if (date === today) {
-            // Jadwal khusus Niky Kamis 08.50; pegawai lain 06.30 WIB.
+            // Jadwal khusus Niky Kamis 09.45; pegawai lain 06.30 WIB.
             // Nama pegawai dipetakan di bawah, sehingga keputusan hari ini
             // diterapkan per profil, bukan satu cutoff untuk semua orang.
           }
@@ -3591,9 +3591,42 @@ export default function Home() {
         const percentage = profileFullMonthDates.length ? Math.round((presentDates.size / profileFullMonthDates.length) * 100) : 0;
         return `<tr><td class="center">${index + 1}</td><td>${esc(profile.nama ?? "Nama belum diatur")}</td><td>${esc(roleLabels[String(profile.role ?? "").toLowerCase()] ?? profile.role ?? "Pegawai")}</td><td class="center">${presentDates.size}</td><td class="center">${profileFullMonthDates.length}</td><td class="center ontime">${onTime}</td><td class="center late">${late}</td><td class="center">${izin}</td><td class="center">${sakit}</td><td class="center absent">${alfa + unrecorded}</td><td class="center"><b>${percentage}%</b></td></tr>`;
       }).join("");
-      const title = `Rekap Absensi Pegawai Bulanan — ${monthLabel}`;
+
+      // Halaman berikutnya memakai format laporan harian yang sudah ada,
+      // dibuat satu halaman untuk setiap hari kerja dalam bulan terpilih.
+      const dailyDates: string[] = [];
+      for (let d = new Date(`${monthStart}T00:00:00Z`); d <= new Date(`${reportEndDate}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1)) {
+        const weekday = d.getUTCDay();
+        if (weekday >= 1 && weekday <= 5) dailyDates.push(d.toISOString().slice(0, 10));
+      }
+      const dailyPages = dailyDates.map((date) => {
+        const dateLabel = new Date(`${date}T12:00:00+07:00`).toLocaleDateString("id-ID", {
+          timeZone: "Asia/Jakarta", weekday: "long", day: "numeric", month: "long", year: "numeric"
+        });
+        const dailyRows = sortedProfiles.map((profile: any, index: number) => {
+          const scheduled = isTeacherScheduledOnDate(profile.nama, date);
+          const record = scheduled ? (attendanceData ?? []).find((item: any) => item.guru_id === profile.id && item.tanggal === date) : undefined;
+          const savedStatus = String(record?.status ?? "hadir").toLowerCase();
+          let status = scheduled ? "Alfa" : "Tidak terjadwal";
+          let statusClass = scheduled ? "absent" : "";
+          if (!scheduled) { status = "Tidak terjadwal"; statusClass = ""; }
+          else if (savedStatus === "izin") { status = "Izin"; statusClass = "absent"; }
+          else if (savedStatus === "sakit") { status = "Sakit"; statusClass = "absent"; }
+          else if (savedStatus === "alfa") { status = "Alfa"; statusClass = "absent"; }
+          else if (record?.jam_masuk) {
+            if (isTeacherOnTime(profile.nama, date, record.jam_masuk)) { status = "Hadir · Tepat waktu"; statusClass = "ontime"; }
+            else { status = "Hadir · Terlambat"; statusClass = "late"; }
+          } else if (record) { status = "Hadir"; statusClass = "ontime"; }
+          const timeIn = record?.jam_masuk ? new Date(record.jam_masuk).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }) : "—";
+          const timeOut = record?.jam_pulang ? new Date(record.jam_pulang).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }) : "—";
+          const location = record?.alamat_masuk || record?.latitude_masuk != null || record?.longitude_masuk != null ? "GPS tercatat" : "Belum ada data GPS";
+          return `<tr><td class="center">${index + 1}</td><td>${esc(profile.nama ?? "Nama belum diatur")}</td><td>${esc(roleLabels[String(profile.role ?? "").toLowerCase()] ?? profile.role ?? "Pegawai")}</td><td class="center">${esc(timeIn)}</td><td class="status ${statusClass}">${esc(status)}</td><td class="center">${esc(timeOut)}</td><td>${esc(location)}</td></tr>`;
+        }).join("");
+        return `<section class="daily-page"><h1>${esc(schoolSettings.namaSekolah || "SD Islam Al-Barkah")}</h1><h2>Rekap Absensi Pegawai Harian</h2><div class="meta"><p>Tanggal laporan: <b>${esc(dateLabel)}</b><br>Batas tepat waktu mengikuti ketentuan jadwal masing-masing guru</p></div><table><thead><tr><th style="width:4%">No.</th><th style="width:22%">Nama Pegawai</th><th style="width:14%">Jabatan</th><th style="width:10%">Jam Masuk</th><th style="width:18%">Hadir / Status</th><th style="width:10%">Jam Pulang</th><th style="width:22%">Lokasi</th></tr></thead><tbody>${dailyRows}</tbody></table><div class="legend">Hijau: hadir tepat waktu · Merah: hadir terlambat · Abu-abu: tidak hadir. Status yang sama berlaku untuk admin, kepala sekolah, dan guru.</div></section>`;
+      }).join("");
+      const title = `Rekap Absensi Pegawai Bulanan dan Harian — ${monthLabel}`;
       printWindow.document.open();
-      printWindow.document.write(`<!doctype html><html><head><meta charset="UTF-8"><title>${esc(title)}</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:10px}h1{font-size:19px;margin:0 0 5px}h2{font-size:14px;margin:0 0 6px}p{margin:4px 0 12px;color:#444;font-size:10px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #cbd5e1;padding:7px 6px;text-align:left}th{background:#e2e8f0;font-size:10px}td{font-size:10px}.center{text-align:center}.ontime{color:#166534;background:#dcfce7}.late{color:#991b1b;background:#fee2e2}.absent{color:#475569;background:#f1f5f9}.note{margin-top:10px;font-size:9px;color:#475569}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><h1>${esc(schoolSettings.namaSekolah || "SD Islam Al-Barkah")}</h1><h2>Rekap Absensi Pegawai Bulanan</h2><p>Bulan laporan: <b>${esc(monthLabel)}</b> · Total hari wajib dihitung untuk satu bulan penuh sesuai jadwal masing-masing pegawai. Kehadiran, izin, sakit, dan alfa dicatat sampai tanggal ${esc(new Date(`${reportEndDate}T12:00:00+07:00`).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" }))}.</p><table><thead><tr><th style="width:4%">No.</th><th style="width:21%">Nama Pegawai</th><th style="width:15%">Jabatan</th><th style="width:9%">Hari Hadir</th><th style="width:9%">Hari Wajib</th><th style="width:10%">Tepat Waktu</th><th style="width:8%">Terlambat</th><th style="width:7%">Izin</th><th style="width:7%">Sakit</th><th style="width:10%">Alfa / Belum tercatat</th><th style="width:7%">Persentase</th></tr></thead><tbody>${rows}</tbody></table><div class="note">Hijau: tepat waktu sesuai batas masing-masing guru. Merah: terlambat setelah batas jadwal. Perhitungan hari kerja mengikuti jadwal masing-masing guru. Abu-abu: tidak hadir. Persentase = hari hadir ÷ total hari wajib satu bulan penuh sesuai jadwal. Tanggal setelah tanggal laporan belum dihitung sebagai alfa/belum tercatat. Rekap otomatis dihitung dari data absensi yang tersimpan.</div><script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250)};</script></body></html>`);
+      printWindow.document.write(`<!doctype html><html><head><meta charset="UTF-8"><title>${esc(title)}</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:10px}h1{font-size:19px;margin:0 0 5px}h2{font-size:14px;margin:0 0 6px}p{margin:4px 0 12px;color:#444;font-size:10px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #cbd5e1;padding:7px 6px;text-align:left;overflow-wrap:anywhere}th{background:#e2e8f0;font-size:10px}td{font-size:10px}.center{text-align:center}.ontime{color:#166534;background:#dcfce7}.late{color:#991b1b;background:#fee2e2}.absent{color:#475569;background:#f1f5f9}.note,.legend{margin-top:10px;font-size:9px;color:#475569}.monthly-signature{width:100%;margin-top:4px;text-align:right;padding-right:45px;font-size:10px;line-height:1.25;break-inside:avoid;page-break-inside:avoid}.signature-space{height:24px}.daily-page{break-before:page;page-break-before:always}.daily-page:first-of-type{break-before:page}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><h1>${esc(schoolSettings.namaSekolah || "SD Islam Al-Barkah")}</h1><h2>Rekap Absensi Pegawai Bulanan</h2><p>Bulan laporan: <b>${esc(monthLabel)}</b> · Total hari wajib dihitung untuk satu bulan penuh sesuai jadwal masing-masing pegawai. Kehadiran, izin, sakit, dan alfa dicatat sampai tanggal ${esc(new Date(`${reportEndDate}T12:00:00+07:00`).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" }))}.</p><table><thead><tr><th style="width:4%">No.</th><th style="width:21%">Nama Pegawai</th><th style="width:15%">Jabatan</th><th style="width:9%">Hari Hadir</th><th style="width:9%">Hari Wajib</th><th style="width:10%">Tepat Waktu</th><th style="width:8%">Terlambat</th><th style="width:7%">Izin</th><th style="width:7%">Sakit</th><th style="width:10%">Alfa / Belum tercatat</th><th style="width:7%">Persentase</th></tr></thead><tbody>${rows}</tbody></table><div class="note">Hijau: tepat waktu sesuai batas masing-masing guru. Merah: terlambat setelah batas jadwal. Perhitungan hari kerja mengikuti jadwal masing-masing guru. Abu-abu: tidak hadir. Persentase = hari hadir ÷ total hari wajib satu bulan penuh sesuai jadwal. Tanggal setelah tanggal laporan belum dihitung sebagai alfa/belum tercatat. Rekap otomatis dihitung dari data absensi yang tersimpan.</div><div class="monthly-signature"><div>Bandung, 30 November 2026</div><div>Mengetahui,</div><div>Kepala Sekolah</div><div class="signature-space"></div><div><b>Sofian, S.Pd.I., M.Pd., Gr.</b></div><div>NIP. ____________________</div></div>${dailyPages}<script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250)};</script></body></html>`);
       printWindow.document.close();
     } catch (error) {
       const message = String(error instanceof Error ? error.message : "Terjadi kesalahan.");
@@ -7666,10 +7699,8 @@ export default function Home() {
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                            {(role === "Admin" || role === "Kepala Sekolah") && <div className="flex flex-wrap items-end gap-3">
-                             <label className="flex flex-col gap-1 text-xs font-semibold text-gray-600">Tanggal laporan harian<input type="date" value={selectedPdfAttendanceDate} max={todayDateString} onChange={(e) => setSelectedPdfAttendanceDate(e.target.value)} className="rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm text-gray-800" /></label>
-                             <button type="button" onClick={() => void exportTeacherAttendanceMonthlyPdf()} className="rounded-xl bg-violet-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-violet-700">📄 PDF Harian</button>
-                             <label className="flex flex-col gap-1 text-xs font-semibold text-gray-600">Bulan laporan bulanan<input type="month" value={selectedPdfAttendanceMonth} max={todayDateString.slice(0, 7)} onChange={(e) => setSelectedPdfAttendanceMonth(e.target.value)} className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm text-gray-800" /></label>
-                             <button type="button" onClick={() => void exportTeacherAttendanceMonthlySummaryPdf()} className="rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-indigo-700">📊 PDF Bulanan</button>
+                             <label className="flex flex-col gap-1 text-xs font-semibold text-gray-600">Bulan laporan<input type="month" value={selectedPdfAttendanceMonth} max={todayDateString.slice(0, 7)} onChange={(e) => setSelectedPdfAttendanceMonth(e.target.value)} className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm text-gray-800" /></label>
+                             <button type="button" onClick={() => void exportTeacherAttendanceMonthlySummaryPdf()} className="rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-indigo-700">📄 Cetak/Save PDF Absensi Guru</button>
                            </div>}
                            <button type="button" onClick={() => setAttendancePanel("menu")} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-gray-600 hover:bg-slate-50">← Kembali</button>
                          </div>
