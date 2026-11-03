@@ -4,6 +4,8 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { supabase } from "@/lib/supabase";
+import PortalLogin from "./PortalLogin";
+
 
 // Menjaga proses start kamera agar tidak bertumpuk saat komponen dipasang ulang.
 let employeeQrStartQueue: Promise<void> = Promise.resolve();
@@ -958,6 +960,7 @@ export default function Home() {
   const [darkMode, setDarkMode] = useState(() => typeof window !== "undefined" && window.localStorage.getItem("albarkah-theme") === "dark");
   const [loginLoading, setLoginLoading] = useState(false);
   const [welcomeVisible, setWelcomeVisible] = useState(false);
+  const [loginFeedback, setLoginFeedback] = useState<{ type: "denied" | "success"; message: string } | null>(null);
   const [welcomeName, setWelcomeName] = useState("");
   const [welcomeRole, setWelcomeRole] = useState<Role>("Siswa");
 
@@ -3052,7 +3055,7 @@ export default function Home() {
     setDashboardLoading(false);
   };
 
-  const login = async () => {
+  const login = async (selectedRole: "siswa" | "guru" | "admin") => {
     const loginInput = loginName.trim();
     const password = loginPassword;
 
@@ -3112,6 +3115,28 @@ export default function Home() {
       };
 
       const resolvedRole = roleMap[profile.role] ?? "Siswa";
+
+      // Validasi jalur login berdasarkan tab yang dipilih di PortalLogin.
+      // Jika tidak cocok, batalkan sesi agar akun tidak dapat masuk lewat peran lain.
+      const allowedRolesByTab: Record<"siswa" | "guru" | "admin", Role[]> = {
+        siswa: ["Siswa", "Orang Tua"],
+        guru: ["Guru", "Kepala Sekolah"],
+        admin: ["Admin"],
+      };
+      if (!allowedRolesByTab[selectedRole].includes(resolvedRole)) {
+        await supabase.auth.signOut();
+        const expectedRoleLabel =
+          selectedRole === "admin" ? "Admin" :
+          selectedRole === "guru" ? "Guru / Kepala Sekolah" :
+          "Siswa / Orang Tua";
+        setLoginFeedback({
+          type: "denied",
+          message: `Akun ini bukan ${expectedRoleLabel}. Silakan pilih tab login sesuai peran akun Anda.`,
+        });
+        window.setTimeout(() => setLoginFeedback(null), 3200);
+        return;
+      }
+
       setRole(resolvedRole);
       setIsGuruPiket(resolvedRole === "Guru" && profile.is_guru_piket === true);
 
@@ -3263,6 +3288,11 @@ export default function Home() {
       await loadAttendanceData();
       await loadStudentParentDashboard(resolvedRole, data.user.id);
 
+      setLoginFeedback({
+        type: "success",
+        message: `Selamat datang, ${profile.nama ?? "pengguna"}! Anda berhasil masuk sebagai ${resolvedRole}.`,
+      });
+      await new Promise((resolve) => window.setTimeout(resolve, 950));
       setLoggedIn(true);
       setActiveMenu("Dashboard");
       setSelectedSubject(null);
@@ -5214,110 +5244,19 @@ export default function Home() {
 
   const showPageLoader = loginLoading || navigationLoading;
 
-  if (!loggedIn) {
+ 
+if (!loggedIn) {
   return (
-      <main className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-900">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(16,185,129,0.24),transparent_32%),radial-gradient(circle_at_85%_80%,rgba(20,184,166,0.18),transparent_30%)]" />
-        <div className="absolute -left-24 -top-24 h-72 w-72 rounded-full bg-emerald-400/10 blur-3xl" />
-        <div className="absolute -bottom-24 -right-24 h-80 w-80 rounded-full bg-teal-400/10 blur-3xl" />
-
-        <div className="relative mx-auto grid min-h-screen max-w-7xl lg:grid-cols-2">
-          <section className="hidden flex-col justify-between p-10 text-white lg:flex xl:p-14">
-            <div>
-              <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-white/95 ring-1 ring-white/20 backdrop-blur">
-                  <img src={SCHOOL_LOGO_URL} alt="Logo SD Islam Al-Barkah" className="h-full w-full object-contain" />
-                </div>
-                <div>
-                  <p className="text-lg font-bold tracking-wide">SD Islam Al-Barkah</p>
-                  <p className="text-sm text-slate-400">Portal Akademik Sekolah</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="max-w-xl">
-              <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-200">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" /> Sistem Akademik Terintegrasi
-              </div>
-              <h1 className="text-5xl font-black leading-tight tracking-tight xl:text-6xl">
-                Kelola sekolah dengan lebih <span className="text-emerald-400">mudah.</span>
-              </h1>
-              <p className="mt-6 max-w-lg text-base leading-7 text-slate-400">
-                Satu portal untuk akademik, guru, siswa, orang tua, nilai, raport, absensi, jadwal, dan administrasi sekolah.
-              </p>
-
-              <div className="mt-10 grid grid-cols-3 gap-3 max-w-lg">
-                {[
-                  ["01", "Akademik"],
-                  ["02", "Kolaborasi"],
-                  ["03", "Administrasi"],
-                ].map(([number, label]) => (
-                  <div key={number} className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur">
-                    <p className="text-xs font-bold text-emerald-300">{number}</p>
-                    <p className="mt-2 text-sm font-semibold text-white">{label}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-500">© {new Date().getFullYear()} SD Islam Al-Barkah</p>
-          </section>
-
-          <section className="flex items-center justify-center p-5 sm:p-8 lg:p-10">
-            <div className="w-full max-w-md animate-[fadeIn_.45s_ease-out]">
-              <div className="mb-6 text-center lg:hidden">
-                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-white shadow-lg shadow-emerald-500/20 ring-1 ring-white/20">
-                  <img src={SCHOOL_LOGO_URL} alt="Logo SD Islam Al-Barkah" className="h-full w-full object-contain" />
-                </div>
-                <h1 className="text-xl font-bold text-white">SD Islam Al-Barkah</h1>
-                <p className="mt-1 text-sm text-slate-400">Portal Akademik Sekolah</p>
-              </div>
-
-              <div className="overflow-hidden rounded-[2rem] border border-white/10 bg-white p-7 shadow-2xl shadow-black/30 sm:p-9">
-                <div className="mb-8">
-                  <div className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600"><MenuIcon name="settings" size={19} /></div>
-                  <h2 className="text-2xl font-black tracking-tight text-slate-900">Selamat datang kembali</h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-500">Masuk untuk melanjutkan ke Portal Akademik SD Islam Al-Barkah.</p>
-                </div>
-
-                <div className="space-y-5">
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-bold text-slate-700">Email / Username</span>
-                    <div className="relative">
-                      <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"><MenuIcon name="user" size={17} /></span>
-                      <input type="text" value={loginName} onChange={(e) => setLoginName(e.target.value)} placeholder="NIS siswa atau email" autoComplete="username" className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3.5 pl-11 pr-4 text-sm outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-4 focus:ring-emerald-50" />
-                    </div>
-                  </label>
-
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-bold text-slate-700">Password</span>
-                    <div className="relative">
-                      <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">🔒</span>
-                      <input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="Masukkan password" autoComplete="current-password" onKeyDown={(e) => { if (e.key === "Enter") login(); }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3.5 pl-11 pr-4 text-sm outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-4 focus:ring-emerald-50" />
-                    </div>
-                  </label>
-
-                  <button onClick={login} disabled={loginLoading} className="group relative w-full overflow-hidden rounded-2xl bg-emerald-600 py-3.5 font-bold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 hover:shadow-emerald-600/30 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60">
-                    <span className="relative z-10 flex items-center justify-center gap-2">
-                      {loginLoading ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> Mohon tunggu...</> : <>Masuk ke Portal <span className="transition-transform group-hover:translate-x-1">→</span></>}
-                    </span>
-                  </button>
-                </div>
-
-                <div className="mt-7 flex items-center gap-3 text-xs text-slate-400">
-                  <div className="h-px flex-1 bg-slate-100" />
-                  <span>Akses aman</span>
-                  <div className="h-px flex-1 bg-slate-100" />
-                </div>
-                <p className="mt-5 text-center text-xs leading-5 text-slate-400">Gunakan akun yang diberikan sekolah. Jangan bagikan password kepada orang lain.</p>
-              </div>
-            </div>
-          </section>
-        </div>
-      </main>
-    );
-  }
-
+    <PortalLogin
+      loginName={loginName}
+      setLoginName={setLoginName}
+      loginPassword={loginPassword}
+      setLoginPassword={setLoginPassword}
+      login={login}
+      loginLoading={loginLoading}
+    />
+  );
+}
 
   return (
     <>
