@@ -43,10 +43,10 @@ export const metadata: Metadata = {
     ],
   },
   appleWebApp: {
-    capable: true,
-    statusBarStyle: "default",
-    title: "Portal Al-Barkah",
-  },
+  capable: true,
+  statusBarStyle: "black-translucent",
+  title: "Portal Akademik SD Islam Al-Barkah",
+},
 };
 
 export const viewport: Viewport = {
