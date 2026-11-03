@@ -5,6 +5,25 @@ import { QRCodeSVG } from "qrcode.react";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { supabase } from "@/lib/supabase";
 import PortalLogin from "./PortalLogin";
+import MenuIcon from "@/components/MenuIcon";
+import type { MenuIconName, Role } from "@/lib/menu";
+import DashboardShell from "@/components/dashboard/DashboardShell";
+import StaffDashboard, { type TeacherLesson, type TeacherLessonAction } from "@/components/dashboard/StaffDashboard";
+import StudentDashboard, {
+  type DashboardChild,
+  type DashboardLearningItem,
+} from "@/components/dashboard/StudentDashboard";
+
+
+type PortalNotification = {
+  id: string;
+  title: string;
+  message: string;
+  category: string;
+  created_at: string;
+  read_at: string | null;
+  resolved_at: string | null;
+};
 
 
 // Menjaga proses start kamera agar tidak bertumpuk saat komponen dipasang ulang.
@@ -232,104 +251,6 @@ const isTeacherOnTime = (name: unknown, date: string, timestamp: string | Date) 
   });
   return time <= getTeacherMorningCutoff(name, date);
 };
-
-type Role = "Admin" | "Kepala Sekolah" | "Guru" | "Siswa" | "Orang Tua";
-
-type MenuIconName = "user" | "dashboard" | "students" | "teachers" | "calendar" | "report" | "journal" | "remedial" | "bk" | "attendance" | "billing" | "settings" | "help" | "ai" | "logout" | "menu" | "search" | "bell" | "sun" | "moon";
-
-function MenuIcon({ name, size = 19 }: { name: MenuIconName; size?: number }) {
-  const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
-  switch (name) {
-    case "user": return <svg {...common}><circle cx="12" cy="8" r="3.5"/><path d="M5.5 20c.8-3.3 3-5 6.5-5s5.7 1.7 6.5 5"/></svg>;
-    case "dashboard": return <svg {...common}><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg>;
-    case "students": return <svg {...common}><circle cx="9" cy="8" r="3"/><path d="M3.5 19c.5-3.2 2.3-5 5.5-5s5 1.8 5.5 5"/><path d="M16 5.5a3 3 0 0 1 0 5.8M17 14c2.2.4 3.5 2 4 5"/></svg>;
-    case "teachers": return <svg {...common}><circle cx="12" cy="8" r="3"/><path d="M5 20c.5-3.5 2.8-5.5 7-5.5s6.5 2 7 5.5"/><path d="M4 11V7h3"/></svg>;
-    case "calendar": return <svg {...common}><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/></svg>;
-    case "report": return <svg {...common}><path d="M6 3.5h8l4 4V20.5H6z"/><path d="M14 3.5v4h4M9 12h6M9 16h6"/></svg>;
-    case "journal": return <svg {...common}><path d="M6 4.5h10a2 2 0 0 1 2 2V20H8a2 2 0 0 1-2-2z"/><path d="M6 18a2 2 0 0 0 2 2M9 9h6M9 13h6"/></svg>;
-    case "remedial": return <svg {...common}><path d="m12 3 2.1 5.2L20 10l-5.9 1.8L12 17l-2.1-5.2L4 10l5.9-1.8z"/><path d="m19 16 .8 2 2.2.8-2.2.7-.8 2-.8-2-2.2-.7 2.2-.8z"/></svg>;
-    case "bk": return <svg {...common}><path d="M12 20s-7-4.2-7-9.2A4.3 4.3 0 0 1 12 8a4.3 4.3 0 0 1 7 2.8C19 15.8 12 20 12 20Z"/><path d="M9.5 11.5h5M12 9v5"/></svg>;
-    case "attendance": return <svg {...common}><path d="m7 12 3 3 7-7"/><circle cx="12" cy="12" r="8.5"/></svg>;
-    case "billing": return <svg {...common}><rect x="3.5" y="6" width="17" height="12" rx="2"/><path d="M3.5 10h17M7 14h3"/></svg>;
-    case "settings": return <svg {...common}><path d="M12 3.8v2M12 18.2v2M20.2 12h-2M5.8 12h-2M17.8 6.2l-1.4 1.4M7.6 16.4l-1.4 1.4M17.8 17.8l-1.4-1.4M7.6 7.6 6.2 6.2"/><circle cx="12" cy="12" r="3.2"/></svg>;
-    case "help": return <svg {...common}><circle cx="12" cy="12" r="9"/><path d="M9.6 9a2.6 2.6 0 1 1 4.5 1.8c-.9.9-2.1 1.4-2.1 2.8"/><path d="M12 17h.01"/></svg>;
-    case "ai": return <svg {...common}><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8-2.8"/><circle cx="12" cy="12" r="4"/></svg>;
-    case "logout": return <svg {...common}><path d="M10 5H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4M14 16l4-4-4-4M10 12h8"/></svg>;
-    case "menu": return <svg {...common}><path d="M4 7h16M4 12h16M4 17h16"/></svg>;
-    case "search": return <svg {...common}><circle cx="10.8" cy="10.8" r="6.3"/><path d="m16 16 4 4"/></svg>;
-    case "bell": return <svg {...common}><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>;
-    case "sun": return <svg {...common}><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.5 4.5l1.4 1.4M18.1 18.1l1.4 1.4M2.5 12h2M19.5 12h2M4.5 19.5l1.4-1.4M18.1 5.9l1.4-1.4"/></svg>;
-    case "moon": return <svg {...common}><path d="M20 15.2A8.4 8.4 0 0 1 8.8 4a8.5 8.5 0 1 0 11.2 11.2Z"/></svg>;
-  }
-}
-
-const menuItems: { name: string; icon: string; roles: Role[] }[] = [
-  {
-    name: "Profil Saya",
-    icon: "user",
-    roles: ["Admin", "Kepala Sekolah", "Guru", "Siswa", "Orang Tua"],
-  },
-  {
-    name: "Dashboard",
-    icon: "dashboard",
-    roles: ["Admin", "Kepala Sekolah", "Guru", "Siswa", "Orang Tua"],
-  },
-  {
-    name: "Data Siswa",
-    icon: "students",
-    roles: ["Admin", "Kepala Sekolah", "Guru"],
-  },
-  {
-    name: "Data Guru",
-    icon: "teachers",
-    roles: ["Admin", "Kepala Sekolah"],
-  },
-  {
-    name: "Jadwal",
-    icon: "calendar",
-    roles: ["Admin", "Kepala Sekolah", "Guru", "Siswa", "Orang Tua"],
-  },
-  {
-    name: "Nilai & Raport",
-    icon: "report",
-    roles: ["Admin", "Kepala Sekolah", "Guru", "Siswa", "Orang Tua"],
-  },
-  {
-    name: "Journal",
-    icon: "journal",
-    roles: ["Admin", "Kepala Sekolah", "Guru"],
-  },
-  {
-    name: "Remedial & Pengayaan",
-    icon: "remedial",
-    roles: ["Admin", "Kepala Sekolah", "Guru", "Siswa"],
-  },
-  {
-    name: "Program BK",
-    icon: "bk",
-    roles: ["Admin", "Kepala Sekolah", "Guru", "Siswa"],
-  },
-  {
-    name: "Absensi",
-    icon: "attendance",
-    roles: ["Admin", "Kepala Sekolah", "Guru", "Siswa", "Orang Tua"],
-  },
-  {
-    name: "SPP & Administrasi",
-    icon: "billing",
-    roles: ["Admin", "Kepala Sekolah", "Siswa", "Orang Tua"],
-  },
-  {
-    name: "Pengaturan Sekolah",
-    icon: "settings",
-    roles: ["Admin", "Kepala Sekolah"],
-  },
-  {
-    name: "Pusat Bantuan",
-    icon: "help",
-    roles: ["Admin", "Kepala Sekolah", "Guru", "Siswa", "Orang Tua"],
-  },
-];
 
 type StudentRecord = {
   id: string;
@@ -757,19 +678,6 @@ type SppFeeType = {
   frekuensi: string;
 };
 
-type DashboardLearningItem = {
-  subject: string;
-  code: string;
-  nilai: number;
-};
-
-type DashboardChild = {
-  id: string;
-  nama: string;
-  nis: string;
-  kelas: string;
-};
-
 type SchoolSettings = {
   namaSekolah: string;
   npsn: string;
@@ -936,6 +844,137 @@ function AttendanceIdCard({
           <button type="button" onClick={onClose} className="rounded-xl bg-slate-950 px-5 py-2 text-xs font-bold text-white transition hover:bg-slate-800">Tutup kartu</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+type AcademicCalendarEvent = {
+  id: string;
+  judul: string;
+  deskripsi: string;
+  kategori: string;
+  tanggalMulai: string;
+  tanggalSelesai: string | null;
+  penting: boolean;
+};
+
+function calendarDateKey(year: number, month: number, day: number) {
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function AcademicCalendarView({
+  events,
+  onRefresh,
+}: {
+  events: AcademicCalendarEvent[];
+  onRefresh: () => Promise<void>;
+}) {
+  const todayKey = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+  const [viewDate, setViewDate] = useState(() => new Date(`${todayKey.slice(0, 7)}-01T12:00:00+07:00`));
+  const [selectedDate, setSelectedDate] = useState(todayKey);
+  const [refreshing, setRefreshing] = useState(false);
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthStart = calendarDateKey(year, month, 1);
+  const monthEnd = calendarDateKey(year, month, daysInMonth);
+  const monthEvents = events
+    .filter((event) => event.tanggalMulai <= monthEnd && (event.tanggalSelesai || event.tanggalMulai) >= monthStart)
+    .sort((a, b) => a.tanggalMulai.localeCompare(b.tanggalMulai));
+  const selectedEvents = events.filter((event) =>
+    event.tanggalMulai <= selectedDate && (event.tanggalSelesai || event.tanggalMulai) >= selectedDate
+  );
+  const monthLabel = viewDate.toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", month: "long", year: "numeric" });
+  const weekdays = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
+  const moveMonth = (delta: number) => {
+    const next = new Date(year, month + delta, 1, 12);
+    setViewDate(next);
+    setSelectedDate(calendarDateKey(next.getFullYear(), next.getMonth(), 1));
+  };
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try { await onRefresh(); } finally { setRefreshing(false); }
+  };
+  const formatDate = (value: string) => new Date(`${value}T12:00:00+07:00`).toLocaleDateString("id-ID", {
+    timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric",
+  });
+  const categoryColor = (category: string) => {
+    const value = category.toLowerCase();
+    if (value.includes("libur")) return "bg-rose-100 text-rose-800";
+    if (value.includes("ujian") || value.includes("asesmen")) return "bg-amber-100 text-amber-800";
+    if (value.includes("peringatan")) return "bg-violet-100 text-violet-800";
+    return "bg-emerald-100 text-emerald-800";
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+        <div className="min-w-0">
+          <p className="font-bold text-blue-950">Acuan Disdik Provinsi Jawa Barat</p>
+          <p className="mt-1 text-sm leading-5 text-blue-900">Pedoman Kalender Pendidikan TA 2026/2027 · Surat Nomor 30234/PK.02.01.05/PSMA, 18 Juni 2026.</p>
+          <p className="mt-1 text-xs text-blue-800">Tanggal berlabel perkiraan dapat berubah mengikuti keputusan pemerintah dan penyesuaian satuan pendidikan.</p>
+        </div>
+        <button type="button" onClick={handleRefresh} disabled={refreshing} className="shrink-0 rounded-xl border border-blue-200 bg-white px-4 py-2.5 text-sm font-bold text-blue-800 hover:bg-blue-100 disabled:opacity-60">{refreshing ? "Memuat…" : "Muat ulang"}</button>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div><p className="text-xs font-bold uppercase tracking-wider text-emerald-700">Kalender bulanan</p><h3 className="mt-1 text-xl font-bold capitalize text-slate-900">{monthLabel}</h3></div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => moveMonth(-1)} aria-label="Bulan sebelumnya" className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-lg hover:bg-slate-50">‹</button>
+              <button type="button" onClick={() => { const current = new Date(`${todayKey}T12:00:00+07:00`); setViewDate(new Date(current.getFullYear(), current.getMonth(), 1, 12)); setSelectedDate(todayKey); }} className="rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50">Hari ini</button>
+              <button type="button" onClick={() => moveMonth(1)} aria-label="Bulan berikutnya" className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-lg hover:bg-slate-50">›</button>
+            </div>
+          </div>
+          <div className="grid grid-cols-7 gap-1.5 text-center">
+            {weekdays.map((day) => <div key={day} className="py-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">{day}</div>)}
+            {Array.from({ length: firstWeekday }, (_, index) => <div key={`blank-${index}`} className="min-h-[68px] rounded-xl bg-slate-50/60 sm:min-h-[78px]" />)}
+            {Array.from({ length: daysInMonth }, (_, index) => {
+              const day = index + 1;
+              const dateKey = calendarDateKey(year, month, day);
+              const dayEvents = events.filter((event) => event.tanggalMulai <= dateKey && (event.tanggalSelesai || event.tanggalMulai) >= dateKey);
+              const selected = selectedDate === dateKey;
+              const isToday = todayKey === dateKey;
+              return (
+                <button key={dateKey} type="button" onClick={() => setSelectedDate(dateKey)} className={`flex min-h-[68px] flex-col items-center rounded-xl border p-1.5 text-sm transition sm:min-h-[78px] ${selected ? "border-blue-500 bg-blue-50 ring-1 ring-blue-200" : "border-slate-100 bg-white hover:border-slate-300 hover:bg-slate-50"}`}>
+                  <span className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${isToday ? "bg-emerald-600 text-white" : selected ? "text-blue-800" : "text-slate-700"}`}>{day}</span>
+                  <span className="mt-1 flex min-h-2 flex-wrap justify-center gap-0.5">{dayEvents.slice(0, 3).map((event) => <i key={event.id} title={event.judul} className={`h-1.5 w-1.5 rounded-full ${event.kategori.toLowerCase().includes("libur") ? "bg-rose-500" : event.kategori.toLowerCase().includes("ujian") ? "bg-amber-500" : "bg-emerald-500"}`} />)}</span>
+                  {dayEvents.length > 0 && <span className="mt-0.5 text-[9px] font-semibold text-slate-500">{dayEvents.length} agenda</span>}
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-[11px] text-slate-500"><span className="flex items-center gap-1.5"><i className="h-2 w-2 rounded-full bg-emerald-500"/> Agenda sekolah</span><span className="flex items-center gap-1.5"><i className="h-2 w-2 rounded-full bg-amber-500"/> Ujian/asesmen</span><span className="flex items-center gap-1.5"><i className="h-2 w-2 rounded-full bg-rose-500"/> Libur</span></div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-wider text-emerald-700">Agenda terpilih</p>
+          <h3 className="mt-1 text-lg font-bold text-slate-900">{formatDate(selectedDate)}</h3>
+          <div className="mt-4 space-y-3">
+            {selectedEvents.length ? selectedEvents.map((event) => <article key={event.id} className="rounded-xl border border-slate-200 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2"><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${categoryColor(event.kategori)}`}>{event.kategori}</span>{event.penting && <span className="text-[10px] font-bold text-amber-700">PENTING</span>}</div>
+              <h4 className="mt-2 text-sm font-bold text-slate-900">{event.judul}</h4>
+              {event.deskripsi && <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-slate-600">{event.deskripsi}</p>}
+              {event.tanggalSelesai && event.tanggalSelesai !== event.tanggalMulai && <p className="mt-2 text-[10px] font-semibold text-slate-400">{formatDate(event.tanggalMulai)} – {formatDate(event.tanggalSelesai)}</p>}
+            </article>) : <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center"><p className="text-sm font-semibold text-slate-600">Tidak ada agenda pada tanggal ini.</p><p className="mt-1 text-xs text-slate-400">Pilih tanggal bertanda titik untuk melihat kegiatan.</p></div>}
+          </div>
+        </section>
+      </div>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-3 flex items-center justify-between gap-3"><div><h3 className="font-bold text-slate-900">Agenda bulan {monthLabel}</h3><p className="mt-1 text-xs text-slate-500">{monthEvents.length} agenda terdaftar</p></div></div>
+        {monthEvents.length ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{monthEvents.map((event) => <article key={event.id} className="rounded-xl border border-slate-200 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2"><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${categoryColor(event.kategori)}`}>{event.kategori}</span>{event.penting && <span className="text-[10px] font-bold text-amber-700">PENTING</span>}</div>
+          <h4 className="mt-2 font-bold text-slate-900">{event.judul}</h4>
+          <p className="mt-1 text-xs font-semibold text-slate-500">{formatDate(event.tanggalMulai)}{event.tanggalSelesai && event.tanggalSelesai !== event.tanggalMulai ? ` – ${formatDate(event.tanggalSelesai)}` : ""}</p>
+          {event.deskripsi && <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-600">{event.deskripsi}</p>}
+        </article>)}</div> : <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">Belum ada agenda untuk bulan ini.</p>}
+      </section>
     </div>
   );
 }
@@ -1151,6 +1190,9 @@ export default function Home() {
 
   const [attendanceSubjectId, setAttendanceSubjectId] = useState<string>("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [portalNotifications, setPortalNotifications] = useState<PortalNotification[]>([]);
+  const [notificationToast, setNotificationToast] = useState<PortalNotification | null>(null);
+  const notificationToastTimerRef = useRef<number | null>(null);
   const [activityRows, setActivityRows] = useState<Array<{
     id: number;
     table_name: string;
@@ -1223,9 +1265,21 @@ export default function Home() {
     totalSiswa: 0,
     totalGuru: 0,
     totalRombel: 0,
-    attendancePercent: null as number | null,
+    attendancePercent: 0,
     attendancePresent: 0,
     attendanceTotal: 0,
+    attendanceExpected: 0,
+    teacherMorningPercent: 0,
+    teacherMorningPresent: 0,
+    teacherMorningTotal: 0,
+    teacherMorningRows: [] as { id: string; nama: string; status: string; jamMasuk: string | null; isPiket: boolean }[],
+    classAttendancePercent: 0,
+    classAttendanceDone: 0,
+    classAttendanceExpected: 0,
+    classAttendanceTodayRows: [] as { id: string; guru: string; kelas: string; mapel: string; status: string; isPiket: boolean }[],
+    classProgressRows: [] as { id: string; kelas: string; totalSiswa: number; tercatat: number; hadir: number; status: string }[],
+    schoolEvents: [] as { id: string; judul: string; deskripsi: string; kategori: string; tanggalMulai: string; tanggalSelesai: string | null; penting: boolean }[],
+    teacherTodaySchedules: [] as TeacherLesson[],
   });
 
   useEffect(() => {
@@ -1422,16 +1476,6 @@ export default function Home() {
     printWindow.document.write(html);
     printWindow.document.close();
   };
-
-  const visibleMenuItems = menuItems.filter((item) => item.roles.includes(role));
-
-  const sidebarGroups = [
-    { label: "HOME", items: ["Profil Saya", "Dashboard"] },
-    { label: "AKADEMIK", items: ["Data Siswa", "Data Guru", "Jadwal", "Nilai & Raport"] },
-    { label: "PEMBELAJARAN", items: ["Journal", "Remedial & Pengayaan", "Program BK", "Absensi"] },
-    { label: "ADMINISTRASI", items: ["SPP & Administrasi"] },
-    { label: "SISTEM", items: ["Pusat Bantuan", "Pengaturan Sekolah"] },
-  ].map((group) => ({ ...group, items: group.items.map((name) => visibleMenuItems.find((item) => item.name === name)).filter(Boolean) as typeof visibleMenuItems }));
 
 
   const downloadExcelTable = (filename: string, title: string, headers: string[], rows: (string | number)[][]) => {
@@ -2851,69 +2895,337 @@ export default function Home() {
     setReportSaved(true);
   };
 
-  const loadSchoolDashboard = async (userRole: Role, assignments: { classId: string; className: string; subjectId: string; subjectName: string; subjectCode: string; isWaliKelas: boolean }[] = []) => {
+  const loadSchoolDashboard = async (
+    userRole: Role,
+    assignments: { classId: string; className: string; subjectId: string; subjectName: string; subjectCode: string; isWaliKelas: boolean }[] = [],
+    teacherProfileName: string = name,
+  ) => {
     if (userRole !== "Admin" && userRole !== "Kepala Sekolah" && userRole !== "Guru") return;
 
     setDashboardLoading(true);
     setDashboardError("");
-
     try {
       const classIds = Array.from(new Set(assignments.map((item) => item.classId).filter(Boolean)));
-
       const studentQuery = userRole === "Guru" && classIds.length > 0
-        ? supabase.from("students").select("id", { count: "exact", head: true }).in("class_id", classIds)
-        : supabase.from("students").select("id", { count: "exact", head: true });
+        ? supabase.from("students").select("id, class_id, status").in("class_id", classIds)
+        : supabase.from("students").select("id, class_id, status");
+      const classQuery = userRole === "Guru" && classIds.length > 0
+        ? supabase.from("classes").select("id, nama").in("id", classIds)
+        : supabase.from("classes").select("id, nama");
 
       const [studentResult, teacherResult, classResult] = await Promise.all([
         studentQuery,
         supabase.from("school_teachers").select("id", { count: "exact", head: true }),
-        userRole === "Guru" && classIds.length > 0
-          ? supabase.from("classes").select("id", { count: "exact", head: true }).in("id", classIds)
-          : supabase.from("classes").select("id", { count: "exact", head: true }),
+        classQuery,
       ]);
-
       const errors = [studentResult.error, teacherResult.error, classResult.error].filter(Boolean);
-      if (errors.length > 0) {
-        setDashboardError(errors.map((error: any) => error.message).join(" | "));
-      }
+      if (errors.length) setDashboardError(errors.map((error: any) => error.message).join(" | "));
 
-      const studentCount = studentResult.count ?? 0;
+      const activeStudents = (studentResult.data ?? []).filter((student: any) => {
+        const status = String(student.status ?? "Aktif").trim().toLowerCase();
+        return status === "aktif" || status === "active" || status === "";
+      });
+      const studentCount = activeStudents.length;
       const teacherCount = teacherResult.count ?? 0;
-      const classCount = classResult.count ?? 0;
-
+      const classRows = classResult.data ?? [];
+      const classCount = classRows.length;
       const today = new Intl.DateTimeFormat("en-CA", {
-        timeZone: "Asia/Jakarta",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
+        timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit",
       }).format(new Date());
 
+      // Absensi siswa dihitung per siswa unik, bukan per baris mata pelajaran.
+      // Jika siswa memiliki beberapa catatan pada hari yang sama, catatan terakhir dipakai.
       const attendanceQuery = userRole === "Guru" && classIds.length > 0
-        ? supabase.from("attendance").select("status").eq("tanggal", today).in("class_id", classIds)
-        : supabase.from("attendance").select("status").eq("tanggal", today);
-
+        ? supabase.from("attendance").select("student_id, class_id, status, created_at").eq("tanggal", today).in("class_id", classIds).order("created_at", { ascending: false })
+        : supabase.from("attendance").select("student_id, class_id, status, created_at").eq("tanggal", today).order("created_at", { ascending: false });
       const { data: attendanceRows, error: attendanceError } = await attendanceQuery;
-      if (attendanceError) {
-        setDashboardError((current) => current ? `${current} | ${attendanceError.message}` : attendanceError.message);
+      if (attendanceError) setDashboardError((current) => current ? `${current} | ${attendanceError.message}` : attendanceError.message);
+      const activeStudentIds = new Set(activeStudents.map((student: any) => student.id));
+      const latestAttendanceByStudent = new Map<string, any>();
+      for (const row of attendanceRows ?? []) {
+        if (row.student_id && activeStudentIds.has(row.student_id) && !latestAttendanceByStudent.has(row.student_id)) latestAttendanceByStudent.set(row.student_id, row);
+      }
+      const attendanceTotal = latestAttendanceByStudent.size;
+      const attendancePresent = [...latestAttendanceByStudent.values()].filter((row: any) => String(row.status ?? "").toLowerCase() === "hadir").length;
+      const attendancePercent = studentCount ? Math.round((attendancePresent / studentCount) * 100) : 0;
+
+      let teacherMorningPercent = 0;
+      let teacherMorningPresent = 0;
+      let teacherMorningTotal = 0;
+      let teacherMorningRows: { id: string; nama: string; status: string; jamMasuk: string | null; isPiket: boolean }[] = [];
+      let classAttendancePercent = 0;
+      let classAttendanceDone = 0;
+      let classAttendanceExpected = 0;
+      let classAttendanceTodayRows: { id: string; guru: string; kelas: string; mapel: string; status: string; isPiket: boolean }[] = [];
+      let classProgressRows: { id: string; kelas: string; totalSiswa: number; tercatat: number; hadir: number; status: string }[] = [];
+      let schoolEvents: { id: string; judul: string; deskripsi: string; kategori: string; tanggalMulai: string; tanggalSelesai: string | null; penting: boolean }[] = [];
+      let teacherTodaySchedules: TeacherLesson[] = [];
+
+      if (userRole === "Admin" || userRole === "Kepala Sekolah") {
+        const monthStart = `${today.slice(0, 7)}-01`;
+        const [profileRes, morningRes, assignmentRes, scheduleRes, classAttendanceRes, eventRes, studentHistoryRes] = await Promise.all([
+          supabase.from("profiles").select("id, nama, role, is_guru_piket").eq("role", "guru"),
+          supabase.from("teacher_attendance").select("guru_id, jam_masuk, status").eq("tanggal", today),
+          supabase.from("teaching_assignments").select("guru_id, class_id, subject_id"),
+          supabase.from("schedules").select("id, hari, class_id, subject_id, classes(nama), subjects(nama)"),
+          supabase.from("attendance").select("created_by, class_id, subject_id, tanggal").gte("tanggal", monthStart).lte("tanggal", today),
+          supabase.from("school_events").select("id, judul, deskripsi, kategori, tanggal_mulai, tanggal_selesai, penting, is_published").eq("is_published", true).order("tanggal_mulai", { ascending: true }).limit(120),
+          supabase.from("attendance").select("student_id, class_id, status, created_at").eq("tanggal", today).order("created_at", { ascending: false }),
+        ]);
+        const guruProfiles = profileRes.data ?? [];
+        const eventRows = eventRes.data ?? [];
+        const isSchoolHoliday = (dateKey: string) => eventRows.some((event: any) =>
+          String(event.kategori ?? "").toLowerCase().includes("libur")
+          && event.tanggal_mulai <= dateKey
+          && (!event.tanggal_selesai || event.tanggal_selesai >= dateKey)
+        );
+        const morningExpectedProfiles = isSchoolHoliday(today) ? [] : guruProfiles.filter((profile: any) => isTeacherScheduledOnDate(profile.nama, today));
+        teacherMorningTotal = morningExpectedProfiles.length;
+        const morningByProfile = new Map((morningRes.data ?? []).map((row: any) => [row.guru_id, row]));
+        teacherMorningRows = morningExpectedProfiles.map((profile: any) => {
+          const record: any = morningByProfile.get(profile.id);
+          const rawStatus = String(record?.status ?? "").toLowerCase();
+          const status = record?.jam_masuk ? "Hadir" : rawStatus === "izin" ? "Izin" : rawStatus === "sakit" ? "Sakit" : rawStatus === "alfa" ? "Alfa" : "Belum Absen";
+          return { id: profile.id, nama: profile.nama ?? "Nama belum diatur", status, jamMasuk: record?.jam_masuk ?? null, isPiket: Boolean(profile.is_guru_piket) || String(profile.nama ?? "").toLowerCase().includes("azkiya") };
+        }).sort((a, b) => a.status === "Belum Absen" ? -1 : b.status === "Belum Absen" ? 1 : a.nama.localeCompare(b.nama, "id"));
+        teacherMorningPresent = teacherMorningRows.filter((row) => row.status === "Hadir").length;
+        teacherMorningPercent = teacherMorningTotal ? Math.round((teacherMorningPresent / teacherMorningTotal) * 100) : 0;
+
+        const profileById = new Map(guruProfiles.map((profile: any) => [profile.id, profile]));
+        const schedules = scheduleRes.data ?? [];
+        const assignmentsData = assignmentRes.data ?? [];
+        const weekdayNames = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+        const todayDay = weekdayNames[new Date(`${today}T12:00:00+07:00`).getDay()];
+        const classNameById = new Map(classRows.map((item: any) => [item.id, item.nama]));
+        const subjectNameByPair = new Map<string, string>();
+        const scheduledDaysByPair = new Map<string, Set<string>>();
+        for (const schedule of schedules as any[]) {
+          const pair = `${schedule.class_id}|${schedule.subject_id}`;
+          subjectNameByPair.set(pair, schedule.subjects?.nama ?? "Mata Pelajaran");
+          if (!scheduledDaysByPair.has(pair)) scheduledDaysByPair.set(pair, new Set<string>());
+          scheduledDaysByPair.get(pair)!.add(schedule.hari);
+        }
+        const expectedKeys = new Set<string>();
+        const todayExpected = new Map<string, { id: string; guru: string; kelas: string; mapel: string; status: string; isPiket: boolean }>();
+        const monthStartDate = new Date(`${monthStart}T12:00:00+07:00`);
+        const todayDate = new Date(`${today}T12:00:00+07:00`);
+        for (const assignment of assignmentsData as any[]) {
+          const profile: any = profileById.get(assignment.guru_id);
+          // Guru piket/pengganti tidak memiliki kewajiban rutin berdasarkan jadwal mapel.
+          if (!profile || profile.is_guru_piket || String(profile.nama ?? "").toLowerCase().includes("azkiya")) continue;
+          const pair = `${assignment.class_id}|${assignment.subject_id}`;
+          const scheduledDays = scheduledDaysByPair.get(pair) ?? new Set<string>();
+          for (let date = new Date(monthStartDate); date <= todayDate; date.setDate(date.getDate() + 1)) {
+            const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+            const dayName = weekdayNames[date.getDay()];
+            if (!scheduledDays.has(dayName) || isSchoolHoliday(dateKey)) continue;
+            const key = `${assignment.guru_id}|${assignment.class_id}|${assignment.subject_id}|${dateKey}`;
+            expectedKeys.add(key);
+            if (dateKey === today) todayExpected.set(key, {
+              id: key,
+              guru: profile.nama ?? "Guru",
+              kelas: classNameById.get(assignment.class_id) ?? "Kelas",
+              mapel: subjectNameByPair.get(pair) ?? "Mata Pelajaran",
+              status: "Belum Mengisi",
+              isPiket: false,
+            });
+          }
+        }
+        const completedRows = classAttendanceRes.data ?? [];
+        const completedKeys = new Set(completedRows.filter((row: any) => row.created_by && row.class_id && row.subject_id).map((row: any) => `${row.created_by}|${row.class_id}|${row.subject_id}|${row.tanggal}`));
+        classAttendanceExpected = expectedKeys.size;
+        classAttendanceDone = [...expectedKeys].filter((key) => completedKeys.has(key)).length;
+        classAttendancePercent = classAttendanceExpected ? Math.round((classAttendanceDone / classAttendanceExpected) * 100) : 0;
+        for (const [key, item] of todayExpected.entries()) if (completedKeys.has(key)) todayExpected.set(key, { ...item, status: "Sudah Mengisi" });
+
+        // Aktivitas pengganti piket ditampilkan, tetapi tidak menambah denominator guru terjadwal.
+        const profileByIdAll = new Map(guruProfiles.map((profile: any) => [profile.id, profile]));
+        const todayAttendanceByTeacherClassSubject = new Set((completedRows as any[]).filter((row) => row.tanggal === today && row.created_by && row.class_id && row.subject_id).map((row) => `${row.created_by}|${row.class_id}|${row.subject_id}`));
+        for (const row of todayAttendanceByTeacherClassSubject) {
+          const [creatorId, classId, subjectId] = row.split("|");
+          const profile: any = profileByIdAll.get(creatorId);
+          if (!profile || !(profile.is_guru_piket || String(profile.nama ?? "").toLowerCase().includes("azkiya"))) continue;
+          const pair = `${classId}|${subjectId}`;
+          todayExpected.set(`piket|${row}`, {
+            id: `piket|${row}`, guru: profile.nama ?? "Guru Piket",
+            kelas: classNameById.get(classId) ?? "Kelas",
+            mapel: subjectNameByPair.get(pair) ?? "Mata Pelajaran",
+            status: "Pengganti — sudah mengisi", isPiket: true,
+          });
+        }
+        classAttendanceTodayRows = [...todayExpected.values()].sort((a, b) => a.status === "Belum Mengisi" ? -1 : b.status === "Belum Mengisi" ? 1 : a.guru.localeCompare(b.guru, "id"));
+
+        // Rekap cakupan absensi siswa per kelas, dengan satu catatan terbaru per siswa.
+        const latestByStudent = new Map<string, any>();
+        for (const row of studentHistoryRes.data ?? []) if (row.student_id && !latestByStudent.has(row.student_id)) latestByStudent.set(row.student_id, row);
+        const studentsByClass = new Map<string, any[]>();
+        for (const student of activeStudents as any[]) {
+          if (!studentsByClass.has(student.class_id)) studentsByClass.set(student.class_id, []);
+          studentsByClass.get(student.class_id)!.push(student);
+        }
+        classProgressRows = classRows.map((classRow: any) => {
+          const classStudents = studentsByClass.get(classRow.id) ?? [];
+          const classStudentIds = new Set(classStudents.map((student: any) => student.id));
+          const records = [...latestByStudent.values()].filter((row: any) => row.class_id === classRow.id && classStudentIds.has(row.student_id));
+          const recorded = records.length;
+          const present = records.filter((row: any) => String(row.status ?? "").toLowerCase() === "hadir").length;
+          const status = !recorded ? "Belum Mengisi" : recorded >= classStudents.length ? "Lengkap" : "Sebagian";
+          return { id: classRow.id, kelas: classRow.nama ?? "Kelas", totalSiswa: classStudents.length, tercatat: recorded, hadir: present, status };
+        }).sort((a: any, b: any) => String(a.kelas).localeCompare(String(b.kelas), "id"));
+
+        schoolEvents = eventRows.map((event: any) => ({
+          id: event.id, judul: event.judul, deskripsi: event.deskripsi ?? "", kategori: event.kategori ?? "Pengumuman",
+          tanggalMulai: event.tanggal_mulai, tanggalSelesai: event.tanggal_selesai ?? null, penting: Boolean(event.penting),
+        }));
+        const extraErrors = [profileRes.error, morningRes.error, assignmentRes.error, scheduleRes.error, classAttendanceRes.error, studentHistoryRes.error].filter(Boolean);
+        if (extraErrors.length) setDashboardError((current) => [current, ...extraErrors.map((error: any) => error.message)].filter(Boolean).join(" | "));
+        // school_events dibuat melalui migrasi SQL terpisah; jika belum ada, dashboard inti tetap berjalan.
+        if (eventRes.error && !String(eventRes.error.message ?? "").toLowerCase().includes("school_events")) {
+          setDashboardError((current) => current ? `${current} | ${eventRes.error.message}` : eventRes.error.message);
+        }
       }
 
-      const attendanceTotal = attendanceRows?.length ?? 0;
-      const attendancePresent = (attendanceRows ?? []).filter((row: any) => row.status === "Hadir").length;
-      const attendancePercent = attendanceTotal > 0
-        ? Math.round((attendancePresent / attendanceTotal) * 100)
-        : null;
+      if (userRole === "Guru") {
+        const weekdayNames = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+        const todayDay = weekdayNames[new Date(`${today}T12:00:00+07:00`).getDay()];
+        const validAssignments = assignments.filter((item) => item.classId && item.subjectId);
+        const allowedPairs = new Set(validAssignments.map((item) => `${item.classId}|${item.subjectId}`));
+        const [eventResult, scheduleResult, schoolTeacherResult] = await Promise.all([
+          supabase.from("school_events").select("id, judul, deskripsi, kategori, tanggal_mulai, tanggal_selesai, penting, is_published").eq("is_published", true).order("tanggal_mulai", { ascending: true }).limit(100),
+          // Jadwal menyimpan teacher_id ke school_teachers.id, bukan profiles.id.
+          // Ambil jadwal hari ini tanpa membatasi class_id dari teaching_assignments,
+          // karena tabel penugasan akun dan master jadwal memakai relasi guru berbeda.
+          supabase.from("schedules").select("id, hari, jam_mulai, jam_selesai, ruang, class_id, subject_id, teacher_id, teacher_id_2, classes(nama), subjects(nama)").eq("hari", todayDay).order("jam_mulai", { ascending: true }),
+          supabase.from("school_teachers").select("id, nama"),
+        ]);
+        if (eventResult.error) setDashboardError((current) => current ? `${current} | ${eventResult.error.message}` : eventResult.error.message);
+        if (scheduleResult.error) setDashboardError((current) => current ? `${current} | ${scheduleResult.error.message}` : scheduleResult.error.message);
+        if (schoolTeacherResult.error) setDashboardError((current) => current ? `${current} | ${schoolTeacherResult.error.message}` : schoolTeacherResult.error.message);
+        schoolEvents = (eventResult.data ?? []).map((event: any) => ({
+          id: event.id, judul: event.judul, deskripsi: event.deskripsi ?? "", kategori: event.kategori ?? "Pengumuman",
+          tanggalMulai: event.tanggal_mulai, tanggalSelesai: event.tanggal_selesai ?? null, penting: Boolean(event.penting),
+        }));
+        // Cocokkan nama login dengan master school_teachers. Ini menjembatani
+        // profiles.id (akun login) ke schedules.teacher_id / teacher_id_2.
+        // Nama dinormalisasi agar gelar seperti S.Pd. atau Gr. tidak menghalangi.
+        const normalizeTeacherName = (value: unknown) => String(value ?? "")
+          .normalize("NFKD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .replace(/\b(s\.?\s?pd\.?\s?i?|s\.?\s?h\.?|m\.?\s?pd\.?|gr\.?|pd\.?\s?i?)\b/gi, " ")
+          .replace(/[^a-z0-9]+/g, " ")
+          .trim()
+          .replace(/\s+/g, " ");
+        const loginNameKey = normalizeTeacherName(teacherProfileName);
+        // Nama pada profiles dan school_teachers tidak selalu identik:
+        // ada variasi gelar, tanda baca, serta typo ringan (mis. Fauziyah/Fauziah,
+        // Yusup/Yusuf, atau Meilana/Meliana). Gunakan pencocokan bertingkat
+        // dengan ambang dan pemeriksaan kandidat kedua agar tidak asal memasangkan.
+        const nameSimilarity = (left: string, right: string) => {
+          if (!left || !right) return 0;
+          if (left === right) return 1;
+          const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+          for (let i = 1; i <= left.length; i++) {
+            let diagonal = previous[0];
+            previous[0] = i;
+            for (let j = 1; j <= right.length; j++) {
+              const above = previous[j];
+              const cost = left[i - 1] === right[j - 1] ? 0 : 1;
+              previous[j] = Math.min(previous[j] + 1, previous[j - 1] + 1, diagonal + cost);
+              diagonal = above;
+            }
+          }
+          return 1 - previous[right.length] / Math.max(left.length, right.length);
+        };
+        const teacherNameCandidates = (schoolTeacherResult.data ?? [])
+          .map((teacher: any) => ({ id: teacher.id as string, key: normalizeTeacherName(teacher.nama) }))
+          .filter((teacher: any) => teacher.id && teacher.key);
+        const exactTeacherMatches = teacherNameCandidates.filter((teacher: any) => teacher.key === loginNameKey);
+        let matchedSchoolTeacherIds: string[] = exactTeacherMatches.map((teacher: any) => teacher.id);
+        if (matchedSchoolTeacherIds.length === 0 && loginNameKey.length >= 6) {
+          const rankedMatches = teacherNameCandidates
+            .map((teacher: any) => ({ ...teacher, score: nameSimilarity(loginNameKey, teacher.key) }))
+            .sort((a: any, b: any) => b.score - a.score);
+          const best = rankedMatches[0];
+          const second = rankedMatches[1];
+          // Terima hanya kecocokan sangat kuat dan tidak ambigu.
+          if (best && best.score >= 0.88 && (!second || best.score - second.score >= 0.04)) {
+            matchedSchoolTeacherIds = [best.id];
+          }
+        }
+
+        const allTodayScheduleRows = scheduleResult.data ?? [];
+        const directlyAssignedRows = allTodayScheduleRows.filter((row: any) =>
+          matchedSchoolTeacherIds.includes(row.teacher_id) || matchedSchoolTeacherIds.includes(row.teacher_id_2)
+        );
+        // teaching_assignments memakai profiles.id, sedangkan schedules memakai
+        // school_teachers.id. Gabungkan kedua bukti, jangan memilih salah satu:
+        // ini menjaga semua akun guru tetap mendapat jadwal meski sebagian jadwal
+        // belum memiliki teacher_id yang terisi konsisten.
+        const assignmentLinkedRows = allTodayScheduleRows.filter((row: any) =>
+          allowedPairs.has(`${row.class_id}|${row.subject_id}`)
+        );
+        const scheduleRowsById = new Map<string, any>();
+        for (const row of [...directlyAssignedRows, ...assignmentLinkedRows]) {
+          scheduleRowsById.set(String(row.id), row);
+        }
+        const teacherScheduleRows = [...scheduleRowsById.values()];
+
+        const groupedLessons = new Map<string, TeacherLesson>();
+        for (const row of teacherScheduleRows) {
+          const pair = `${row.class_id}|${row.subject_id}`;
+          const classRelation = Array.isArray(row.classes) ? row.classes[0] : row.classes;
+          const subjectRelation = Array.isArray(row.subjects) ? row.subjects[0] : row.subjects;
+          const existing: TeacherLesson = groupedLessons.get(pair) ?? {
+            id: pair,
+            classId: row.class_id,
+            className: classRelation?.nama ?? validAssignments.find((item) => item.classId === row.class_id)?.className ?? "Kelas",
+            subjectId: row.subject_id,
+            subjectName: subjectRelation?.nama ?? validAssignments.find((item) => item.classId === row.class_id && item.subjectId === row.subject_id)?.subjectName ?? "Mata Pelajaran",
+            room: row.ruang ?? "",
+            sessions: [],
+          };
+          const slot = { start: String(row.jam_mulai ?? "").slice(0, 5), end: String(row.jam_selesai ?? "").slice(0, 5) };
+          if (slot.start && slot.end && !existing.sessions.some((item) => item.start === slot.start && item.end === slot.end)) existing.sessions.push(slot);
+          if (!existing.room && row.ruang) existing.room = row.ruang;
+          groupedLessons.set(pair, existing);
+        }
+        teacherTodaySchedules = [...groupedLessons.values()]
+          .map((lesson) => ({ ...lesson, sessions: [...lesson.sessions].sort((a, b) => a.start.localeCompare(b.start)) }))
+          .sort((a, b) => (a.sessions[0]?.start ?? "").localeCompare(b.sessions[0]?.start ?? "") || a.className.localeCompare(b.className, "id"));
+      }
 
       setDashboardSchoolStats({
-        totalSiswa: studentCount,
-        totalGuru: teacherCount,
-        totalRombel: classCount,
-        attendancePercent,
-        attendancePresent,
-        attendanceTotal,
+        totalSiswa: studentCount, totalGuru: teacherCount, totalRombel: classCount,
+        attendancePercent, attendancePresent, attendanceTotal, attendanceExpected: studentCount,
+        teacherMorningPercent, teacherMorningPresent, teacherMorningTotal, teacherMorningRows,
+        classAttendancePercent, classAttendanceDone, classAttendanceExpected, classAttendanceTodayRows, classProgressRows, schoolEvents, teacherTodaySchedules,
       });
     } finally {
       setDashboardLoading(false);
     }
+  };
+
+  const createSchoolAnnouncement = async (payload: { judul: string; deskripsi: string; kategori: string; tanggal_mulai: string; tanggal_selesai: string | null; penting: boolean }) => {
+    if ((role !== "Admin" && role !== "Kepala Sekolah") || !currentUserId) throw new Error("Hanya Admin atau Kepala Sekolah yang dapat membuat pengumuman.");
+    const { error } = await supabase.from("school_events").insert({ ...payload, is_published: true, created_by: currentUserId });
+    if (error) throw error;
+    await loadSchoolDashboard(role, teacherAssignments, name);
+  };
+
+  const loadAcademicCalendar = async () => {
+    const { data, error } = await supabase.from("school_events")
+      .select("id, judul, deskripsi, kategori, tanggal_mulai, tanggal_selesai, penting, is_published")
+      .eq("is_published", true)
+      .order("tanggal_mulai", { ascending: true });
+    if (error) throw error;
+    setDashboardSchoolStats((current) => ({
+      ...current,
+      schoolEvents: (data ?? []).map((event: any) => ({
+        id: event.id, judul: event.judul, deskripsi: event.deskripsi ?? "", kategori: event.kategori ?? "Pengumuman",
+        tanggalMulai: event.tanggal_mulai, tanggalSelesai: event.tanggal_selesai ?? null, penting: Boolean(event.penting),
+      })),
+    }));
   };
 
   const loadStudentParentDashboard = async (userRole: Role, userId: string) => {
@@ -3283,7 +3595,7 @@ export default function Home() {
       }
 
       setCurrentUserId(data.user.id);
-      await loadSchoolDashboard(resolvedRole, loginAssignments);
+      await loadSchoolDashboard(resolvedRole, loginAssignments, profile.nama ?? "");
       await loadGradeSetup(resolvedRole, loginAssignments, data.user.id);
       await loadAttendanceData();
       await loadStudentParentDashboard(resolvedRole, data.user.id);
@@ -3413,6 +3725,244 @@ export default function Home() {
       void loadTeacherAttendanceToday();
     }
   }, [loggedIn, role, currentUserId, attendanceDate]);
+
+
+  // Pusat notifikasi berbasis database. Agenda penting dibuat pada hari H,
+  // sedangkan pengingat absensi pagi dibuat untuk akun Guru setelah 06.30 WIB.
+  useEffect(() => {
+    if (!loggedIn || !currentUserId || !["Guru", "Admin", "Kepala Sekolah"].includes(role)) {
+      setPortalNotifications([]);
+      setNotificationToast(null);
+      return;
+    }
+
+    let cancelled = false;
+    let isChecking = false;
+
+    const jakartaToday = () => new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(new Date());
+    const jakartaMinutesNow = () => {
+      const value = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false,
+      }).format(new Date());
+      const [hour, minute] = value.split(":").map(Number);
+      return hour * 60 + minute;
+    };
+
+    const checkNotifications = async () => {
+      if (cancelled || isChecking) return;
+      isChecking = true;
+      try {
+        const today = jakartaToday();
+        const nowIso = new Date().toISOString();
+        const newlyCreated: PortalNotification[] = [];
+
+        // Pengumuman penting hanya memunculkan notifikasi tepat pada tanggal mulai.
+        const { data: events, error: eventsError } = await supabase
+          .from("school_events")
+          .select("id, judul, deskripsi, kategori, tanggal_mulai, penting, is_published")
+          .eq("is_published", true)
+          .eq("penting", true)
+          .eq("tanggal_mulai", today);
+
+        if (eventsError) {
+          console.error("Gagal memeriksa agenda notifikasi:", eventsError.message);
+        } else {
+          for (const event of events ?? []) {
+            const key = `school-event:${event.id}:${today}`;
+            const { data: inserted, error: insertError } = await supabase
+              .from("user_notifications")
+              .upsert({
+                user_id: currentUserId, notification_key: key,
+                title: event.judul,
+                message: event.deskripsi || `Agenda ${event.judul} berlangsung hari ini.`,
+                category: event.kategori || "Agenda Sekolah",
+                source_type: "school_event", source_id: event.id,
+                created_at: nowIso,
+              }, { onConflict: "user_id,notification_key", ignoreDuplicates: true })
+              .select("id, title, message, category, created_at, read_at, resolved_at");
+            if (insertError) console.error("Gagal menyimpan notifikasi agenda:", insertError.message);
+            if (inserted?.length) newlyCreated.push(inserted[0] as PortalNotification);
+          }
+        }
+
+        // Pengingat absensi pagi HANYA untuk akun Guru yang benar-benar memiliki
+        // jadwal mengajar pada hari ini. Acuan jadwal adalah schedules.teacher_id
+        // dan teacher_id_2 (school_teachers.id), bukan asumsi Senin-Jumat.
+        if (role === "Guru") {
+          const key = `teacher-morning-missing:${today}`;
+          const weekdayNames = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+          const todayDay = weekdayNames[new Date(`${today}T12:00:00+07:00`).getDay()];
+
+          const [profileResult, schoolTeachersResult, todaySchedulesResult] = await Promise.all([
+            supabase.from("profiles").select("nama").eq("id", currentUserId).maybeSingle(),
+            supabase.from("school_teachers").select("id, nama"),
+            supabase.from("schedules").select("teacher_id, teacher_id_2").eq("hari", todayDay),
+          ]);
+
+          const reminderDataError = profileResult.error || schoolTeachersResult.error || todaySchedulesResult.error;
+          if (reminderDataError) {
+            console.error("Gagal memeriksa jadwal guru untuk pengingat absensi pagi:", reminderDataError.message);
+          } else {
+            const normalizeName = (value: unknown) => String(value ?? "")
+              .normalize("NFKD")
+              .replace(/[\u0300-\u036f]/g, "")
+              .toLowerCase()
+              .replace(/\b(s\.?\s?pd\.?\s?i?|s\.?\s?h\.?|m\.?\s?pd\.?|gr\.?|pd\.?\s?i?)\b/gi, " ")
+              .replace(/[^a-z0-9]+/g, " ")
+              .trim()
+              .replace(/\s+/g, " ");
+            const distanceScore = (left: string, right: string) => {
+              if (!left || !right) return 0;
+              if (left === right) return 1;
+              const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+              for (let i = 1; i <= left.length; i++) {
+                let diagonal = previous[0];
+                previous[0] = i;
+                for (let j = 1; j <= right.length; j++) {
+                  const above = previous[j];
+                  const cost = left[i - 1] === right[j - 1] ? 0 : 1;
+                  previous[j] = Math.min(previous[j] + 1, previous[j - 1] + 1, diagonal + cost);
+                  diagonal = above;
+                }
+              }
+              return 1 - previous[right.length] / Math.max(left.length, right.length);
+            };
+
+            const profileName = normalizeName(profileResult.data?.nama || name);
+            const teacherCandidates = (schoolTeachersResult.data ?? [])
+              .map((teacher: any) => ({ id: String(teacher.id), key: normalizeName(teacher.nama) }))
+              .filter((teacher: any) => teacher.id && teacher.key);
+            const exactMatches = teacherCandidates.filter((teacher: any) => teacher.key === profileName);
+            let matchedTeacherIds: string[] = exactMatches.length === 1 ? [exactMatches[0].id] : [];
+
+            if (matchedTeacherIds.length === 0 && exactMatches.length === 0 && profileName.length >= 6) {
+              const ranked = teacherCandidates
+                .map((teacher: any) => ({ ...teacher, score: distanceScore(profileName, teacher.key) }))
+                .sort((a: any, b: any) => b.score - a.score);
+              const best = ranked[0];
+              const second = ranked[1];
+              if (best && best.score >= 0.88 && (!second || best.score - second.score >= 0.04)) {
+                matchedTeacherIds = [best.id];
+              }
+            }
+
+            const hasScheduleToday = matchedTeacherIds.length > 0 && (todaySchedulesResult.data ?? []).some((row: any) =>
+              matchedTeacherIds.includes(String(row.teacher_id ?? "")) || matchedTeacherIds.includes(String(row.teacher_id_2 ?? ""))
+            );
+
+            // Akun tanpa jadwal hari ini (termasuk guru piket/pengganti) tidak
+            // menerima pengingat rutin. Jika pengingat lama sudah sempat dibuat,
+            // selesaikan agar tidak terus muncul sebagai notifikasi aktif.
+            if (!hasScheduleToday || jakartaMinutesNow() < 6 * 60 + 30) {
+              await supabase.from("user_notifications")
+                .update({ resolved_at: nowIso, read_at: nowIso })
+                .eq("user_id", currentUserId)
+                .eq("notification_key", key)
+                .is("resolved_at", null);
+            } else {
+              const { data: morningRecord, error: morningError } = await supabase
+                .from("teacher_attendance")
+                .select("id, jam_masuk, status")
+                .eq("guru_id", currentUserId)
+                .eq("tanggal", today)
+                .maybeSingle();
+
+              if (morningError) {
+                console.error("Gagal memeriksa absensi pagi untuk notifikasi:", morningError.message);
+              } else {
+                const status = String(morningRecord?.status ?? "").toLowerCase();
+                const alreadyAccounted = Boolean(morningRecord?.jam_masuk) || ["izin", "sakit", "alfa"].includes(status);
+                if (alreadyAccounted) {
+                  await supabase.from("user_notifications")
+                    .update({ resolved_at: nowIso, read_at: nowIso })
+                    .eq("user_id", currentUserId)
+                    .eq("notification_key", key)
+                    .is("resolved_at", null);
+                } else {
+                  const { data: inserted, error: insertError } = await supabase
+                    .from("user_notifications")
+                    .upsert({
+                      user_id: currentUserId, notification_key: key,
+                      title: "Anda belum melakukan absen kehadiran pagi",
+                      message: "Anda memiliki jadwal mengajar hari ini dan belum melakukan absensi masuk setelah pukul 06.30 WIB. Silakan lakukan absensi pagi melalui menu Absensi.",
+                      category: "Pengingat Absensi Pagi",
+                      source_type: "teacher_attendance", source_id: null, created_at: nowIso,
+                    }, { onConflict: "user_id,notification_key", ignoreDuplicates: true })
+                    .select("id, title, message, category, created_at, read_at, resolved_at");
+                  if (insertError) console.error("Gagal menyimpan pengingat absensi pagi:", insertError.message);
+                  if (inserted?.length) newlyCreated.push(inserted[0] as PortalNotification);
+                }
+              }
+            }
+          }
+        }
+
+        const { data: rows, error: rowsError } = await supabase
+          .from("user_notifications")
+          .select("id, title, message, category, created_at, read_at, resolved_at")
+          .eq("user_id", currentUserId)
+          .order("created_at", { ascending: false })
+          .limit(50);
+
+        if (rowsError) {
+          console.error("Gagal memuat riwayat notifikasi:", rowsError.message);
+        } else if (!cancelled) {
+          setPortalNotifications((rows ?? []) as PortalNotification[]);
+        }
+
+        if (!cancelled && newlyCreated.length > 0) {
+          const nextToast = newlyCreated[0];
+          setNotificationToast(nextToast);
+          if (notificationToastTimerRef.current) window.clearTimeout(notificationToastTimerRef.current);
+          notificationToastTimerRef.current = window.setTimeout(() => {
+            setNotificationToast(null);
+            notificationToastTimerRef.current = null;
+          }, 7000);
+        }
+      } catch (error) {
+        console.error("Pemeriksaan notifikasi gagal:", error);
+      } finally {
+        isChecking = false;
+      }
+    };
+
+    void checkNotifications();
+    const interval = window.setInterval(() => { void checkNotifications(); }, 30_000);
+    const refreshOnFocus = () => { void checkNotifications(); };
+    window.addEventListener("focus", refreshOnFocus);
+    const channel = supabase
+      .channel(`notification-refresh-${currentUserId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "teacher_attendance", filter: `guru_id=eq.${currentUserId}` }, () => { void checkNotifications(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "school_events" }, () => { void checkNotifications(); })
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshOnFocus);
+      void supabase.removeChannel(channel);
+      if (notificationToastTimerRef.current) window.clearTimeout(notificationToastTimerRef.current);
+    };
+  }, [loggedIn, currentUserId, role]);
+
+  const markPortalNotificationsRead = async () => {
+    if (!currentUserId) return;
+    const unreadIds = portalNotifications.filter((item) => !item.read_at && !item.resolved_at).map((item) => item.id);
+    if (unreadIds.length) {
+      const readAt = new Date().toISOString();
+      setPortalNotifications((current) => current.map((item) => unreadIds.includes(item.id) ? { ...item, read_at: readAt } : item));
+      const { error } = await supabase.from("user_notifications")
+        .update({ read_at: readAt })
+        .eq("user_id", currentUserId)
+        .is("read_at", null);
+      if (error) console.error("Gagal menandai notifikasi sudah dibaca:", error.message);
+    }
+    if (notificationToastTimerRef.current) window.clearTimeout(notificationToastTimerRef.current);
+    notificationToastTimerRef.current = null;
+    setNotificationToast(null);
+  };
 
         useEffect(() => {
     if (!loggedIn || !currentUserId) {
@@ -4352,9 +4902,11 @@ export default function Home() {
           class_id,
           subject_id,
           teacher_id,
+          teacher_id_2,
           classes(id, nama),
           subjects(id, nama, kode),
-          school_teachers(id, nama)
+          teacher1:school_teachers!schedules_teacher_id_fkey(id, nama),
+          teacher2:school_teachers!schedules_teacher_id_2_fkey(id, nama)
         `)
         .order("hari")
         .order("jam_mulai"),
@@ -4376,7 +4928,9 @@ export default function Home() {
         className: item.classes?.nama ?? "",
         subjectName: item.subjects?.nama ?? "",
         subjectCode: item.subjects?.kode ?? "",
-        teacherName: item.school_teachers?.nama ?? "",
+        teacherName: [item.teacher1?.nama, item.teacher2?.nama]
+          .filter((name: string | null | undefined) => Boolean(name))
+          .join(" & "),
         hari: item.hari,
         jamMulai: String(item.jam_mulai ?? "").slice(0, 5),
         jamSelesai: String(item.jam_selesai ?? "").slice(0, 5),
@@ -4458,7 +5012,7 @@ export default function Home() {
 
     let collisionQuery = supabase
       .from("schedules")
-      .select("id, class_id, teacher_id, jam_mulai, jam_selesai")
+      .select("id, class_id, subject_id, teacher_id, jam_mulai, jam_selesai")
       .eq("hari", hari)
       .lt("jam_mulai", jamSelesai)
       .gt("jam_selesai", jamMulai);
@@ -4479,10 +5033,26 @@ export default function Home() {
       return;
     }
 
-    const teacherCollision = (collisions ?? []).find((row: any) => row.teacher_id === teacherId);
+    // Kelas IV Ali dan IV Umar mengikuti jadwal gabungan yang sama.
+    // Guru boleh tercatat pada kedua kelas hanya jika mapel dan rentang waktunya identik.
+    const gradeFourAliId = "250d20e4-308a-48ba-a6e7-b5097c3d9911";
+    const gradeFourUmarId = "7c0b2979-877a-4226-8d00-23ad2c2a424f";
+    const isGradeFourPair = (firstClassId: string, secondClassId: string) =>
+      (firstClassId === gradeFourAliId && secondClassId === gradeFourUmarId) ||
+      (firstClassId === gradeFourUmarId && secondClassId === gradeFourAliId);
+
+    const teacherCollision = (collisions ?? []).find((row: any) => {
+      if (row.teacher_id !== teacherId) return false;
+      const sameGradeFourSharedLesson =
+        isGradeFourPair(row.class_id, classId) &&
+        row.subject_id === subjectId &&
+        String(row.jam_mulai).slice(0, 5) === jamMulai &&
+        String(row.jam_selesai).slice(0, 5) === jamSelesai;
+      return !sameGradeFourSharedLesson;
+    });
     if (teacherCollision) {
       setScheduleSaving(false);
-      alert("Bentrok jadwal: guru tersebut sudah mengajar pada jam yang sama di hari tersebut.");
+      alert("Bentrok jadwal: guru tersebut sudah mengajar pada jam yang sama di hari tersebut. Pengecualian hanya berlaku untuk jadwal gabungan kelas IV Ali dan IV Umar yang mapel serta jamnya sama persis.");
       return;
     }
 
@@ -4792,12 +5362,12 @@ export default function Home() {
           ).values()
         );
 
-  const loadJournalData = async () => {
+  const loadJournalData = async (filters?: { classId?: string; subjectId?: string; month?: string; year?: string }) => {
     setJournalLoading(true);
     setJournalError("");
 
-    const monthNumber = Number(journalMonth);
-    const yearNumber = Number(journalYear);
+    const monthNumber = Number(filters?.month ?? journalMonth);
+    const yearNumber = Number(filters?.year ?? journalYear);
     if (!monthNumber || monthNumber < 1 || monthNumber > 12 || !yearNumber) {
       setJournalError("Bulan dan tahun jurnal belum valid.");
       setJournalRows([]);
@@ -4826,8 +5396,10 @@ export default function Home() {
       .order("tanggal", { ascending: true })
       .order("jam", { ascending: true });
 
-    if (journalClassId) query = query.eq("class_id", journalClassId);
-    if (journalSubjectId) query = query.eq("subject_id", journalSubjectId);
+    const classFilter = filters?.classId ?? journalClassId;
+    const subjectFilter = filters?.subjectId ?? journalSubjectId;
+    if (classFilter) query = query.eq("class_id", classFilter);
+    if (subjectFilter) query = query.eq("subject_id", subjectFilter);
 
     const { data, error } = await query;
     if (error) {
@@ -5186,7 +5758,11 @@ export default function Home() {
 
     try {
       if (menuName === "Dashboard") {
-        await loadSchoolDashboard(role, teacherAssignments);
+        await loadSchoolDashboard(role, teacherAssignments, name);
+      }
+
+      if (menuName === "Kalender Akademik" && (role === "Admin" || role === "Kepala Sekolah" || role === "Guru")) {
+        await loadAcademicCalendar();
       }
 
       if (menuName === "Data Siswa") {
@@ -5230,6 +5806,50 @@ export default function Home() {
       await new Promise((resolve) => window.setTimeout(resolve, 280));
     } finally {
       setNavigationLoading(false);
+    }
+  };
+
+  const openTeacherLessonAction = async (lesson: TeacherLesson, action: TeacherLessonAction) => {
+    if (role !== "Guru") return;
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    const slotLabel = lesson.sessions.map((session) => `${session.start}–${session.end}`).join(", ");
+
+    if (action === "attendance") {
+      await openMenu("Absensi");
+      setAttendancePanel("siswa");
+      setAttendanceClass(lesson.className);
+      setAttendanceClassChosen(true);
+      setAttendanceDate(today);
+      setAttendanceSubjectId(lesson.subjectId);
+      setAttendanceSaved(false);
+      const { data, error } = await supabase.from("attendance").select("student_id, status").eq("class_id", lesson.classId).eq("subject_id", lesson.subjectId).eq("tanggal", today);
+      if (error) console.error("Gagal memuat status absensi jadwal terpilih:", error);
+      const next: Record<string, AttendanceStatus> = {};
+      for (const row of data ?? []) if (attendanceStatuses.includes(row.status as AttendanceStatus)) next[row.student_id] = row.status as AttendanceStatus;
+      setStudentAttendance(next);
+      return;
+    }
+
+    if (action === "journal") {
+      await openMenu("Journal");
+      setJournalMonth(today.slice(5, 7));
+      setJournalYear(today.slice(0, 4));
+      setJournalClassId(lesson.classId);
+      setJournalSubjectId(lesson.subjectId);
+      setJournalEditingId(null);
+      setJournalForm({ tanggal: today, jam: slotLabel, kegiatan: lesson.subjectName, tujuan_pembelajaran: "", materi_pembelajaran: "", catatan: "" });
+      setJournalAbsences({});
+      setJournalFormOpen(true);
+      await loadJournalData({ classId: lesson.classId, subjectId: lesson.subjectId, month: today.slice(5, 7), year: today.slice(0, 4) });
+      return;
+    }
+
+    if (action === "bk") {
+      await openMenu("Program BK");
+      setBkClassId(lesson.classId);
+      setBkEditingId(null);
+      setBkForm({ studentId: "", classId: lesson.classId, tanggal: today, jenisProgram: "Pendampingan belajar", ringkasan: "", tindakLanjut: "", status: "dipantau" });
+      setBkFormOpen(true);
     }
   };
 
@@ -5354,144 +5974,28 @@ if (!loggedIn) {
           .report-page-second { padding-top: 3mm; }
         }
       `}</style>
-      <div className="min-h-screen bg-[#f7f8fc] text-slate-900">
-      <aside className="fixed left-0 top-0 z-30 hidden h-screen w-[272px] flex-col border-r border-slate-200/80 bg-white shadow-[4px_0_24px_rgba(15,23,42,0.035)] lg:flex">
-        <div className="flex h-20 shrink-0 items-center gap-3 border-b border-slate-100 px-6">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
-            <img src={SCHOOL_LOGO_URL} alt="Logo SD Islam Al-Barkah" className="h-full w-full object-contain" />
-          </div>
-          <div className="min-w-0">
-            <h1 className="truncate text-sm font-bold text-slate-900">SD Islam Al-Barkah</h1>
-            <p className="text-xs text-slate-500">Academic Management System</p>
-          </div>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-6 pb-4">
-          {sidebarGroups.map((group) => (
-            <div key={group.label} className="mb-6">
-              <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">{group.label}</p>
-              <nav className="space-y-1">
-                {group.items.map((item) => (
-                  <button key={item.name} type="button" onClick={() => openMenu(item.name)} className={`group flex min-h-10 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold transition-all touch-manipulation ${activeMenu === item.name ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}>
-                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${activeMenu === item.name ? "bg-white/10 text-white" : "bg-slate-50 text-slate-500 group-hover:bg-white"}`}><MenuIcon name={item.icon as MenuIconName} size={17} /></span>
-                    <span className="truncate">{item.name}</span>
-                  </button>
-                ))}
-              </nav>
-            </div>
-          ))}
-        </div>
-
-        <div className="shrink-0 w-full border-t border-slate-100 p-4">
-          <div className="mb-3 rounded-xl bg-slate-50 p-3">
-            <p className="truncate text-xs font-semibold text-slate-700">{name}</p>
-            <p className="mt-0.5 truncate text-[11px] text-slate-500">{role}</p>
-          </div>
-          <button type="button" onClick={logout} className="min-h-11 w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-500 transition hover:bg-red-50 hover:text-red-600 touch-manipulation">
-            <span className="inline-flex items-center gap-2"><MenuIcon name="logout" size={17} />Keluar dari Portal</span>
-          </button>
-        </div>
-      </aside>
-
-      {mobileMenuOpen && (
-        <button
-          type="button"
-          aria-label="Tutup menu"
-          onClick={() => setMobileMenuOpen(false)}
-          className="fixed inset-0 z-40 bg-slate-950/40 lg:hidden"
-        />
-      )}
-
-      <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-[min(88vw,320px)] flex-col border-r border-slate-200 bg-white shadow-2xl transition-transform duration-200 lg:hidden ${
-          mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        <div className="flex h-20 shrink-0 items-center justify-between border-b border-slate-100 px-5">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
-              <img src={SCHOOL_LOGO_URL} alt="Logo SD Islam Al-Barkah" className="h-full w-full object-contain" />
-            </div>
-            <div className="min-w-0">
-              <h1 className="truncate text-sm font-bold text-slate-900">SD Islam Al-Barkah</h1>
-              <p className="text-[11px] text-slate-500">{role}</p>
-            </div>
-          </div>
-          <button type="button" onClick={() => setMobileMenuOpen(false)} aria-label="Tutup menu" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-2xl text-slate-500 hover:bg-slate-100 touch-manipulation">×</button>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5">
-          {sidebarGroups.map((group) => (
-            <div key={group.label} className="mb-6">
-              <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">{group.label}</p>
-              <nav className="space-y-1">
-                {group.items.map((item) => (
-                  <button key={item.name} type="button" onClick={() => openMenu(item.name)} className={`group flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition-all touch-manipulation ${activeMenu === item.name ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"}`}>
-                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${activeMenu === item.name ? "bg-white/10 text-white" : "bg-slate-50 text-slate-500"}`}><MenuIcon name={item.icon as MenuIconName} size={17} /></span>
-                    <span className="truncate">{item.name}</span>
-                  </button>
-                ))}
-              </nav>
-            </div>
-          ))}
-        </div>
-
-        <div className="shrink-0 border-t border-slate-100 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-          <div className="mb-3 rounded-xl bg-slate-50 p-3">
-            <p className="truncate text-xs font-semibold text-slate-700">{name}</p>
-            <p className="mt-0.5 truncate text-[11px] text-slate-500">{role}</p>
-          </div>
-          <button type="button" onClick={logout} className="min-h-12 w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-slate-500 transition hover:bg-red-50 hover:text-red-600 touch-manipulation">
-            <span className="inline-flex items-center gap-2"><MenuIcon name="logout" size={17} />Keluar dari Portal</span>
-          </button>
-        </div>
-      </aside>
-
-      <main className="lg:pl-[272px]">
-        <header className="sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-slate-200/80 bg-white/90 px-4 backdrop-blur-xl sm:px-8">
-          <div className="flex min-w-0 items-center gap-3">
-            <button type="button" onClick={() => setMobileMenuOpen(true)} aria-label="Buka menu" aria-expanded={mobileMenuOpen} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-xl text-slate-700 shadow-sm hover:bg-slate-50 touch-manipulation lg:hidden"><MenuIcon name="menu" size={20} /></button>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
-              <span>Portal Sekolah</span>
-              <span>/</span>
-              <span className="text-slate-600">{activeMenu}</span>
-            </div>
-            <h2 className="mt-1 text-lg font-bold tracking-tight text-slate-900 sm:text-xl">
-              {activeMenu}
-            </h2>
-          </div>
-          </div>
-
-          <div className="flex items-center gap-2.5 sm:gap-3">
-            <button
-              type="button"
-              onClick={toggleDarkMode}
-              aria-label={darkMode ? "Gunakan white mode" : "Gunakan dark mode"}
-              title={darkMode ? "White mode" : "Dark mode"}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
-            >
-              <MenuIcon name={darkMode ? "sun" : "moon"} size={18} />
-            </button>
-            <div className="hidden text-right sm:block">
-              <p className="text-sm font-semibold text-slate-800">{name}</p>
-              <p className="text-xs text-slate-500">{role}</p>
-            </div>
-            {userProfile.fotoUrl ? (
-              <img
-                src={userProfile.fotoUrl}
-                alt="Foto profil"
-                className="h-10 w-10 rounded-full object-cover ring-4 ring-slate-100"
-              />
-            ) : (
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-sm font-bold text-white ring-4 ring-slate-100">
-                {(userProfile.nama || name).charAt(0).toUpperCase()}
-              </div>
-            )}
-          </div>
-        </header>
-
-        <div className="p-4 sm:p-6 lg:p-8">
+    <DashboardShell
+      role={role}
+      name={name}
+      displayName={userProfile.nama || name}
+      photoUrl={userProfile.fotoUrl}
+      activeMenu={activeMenu}
+      onOpenMenu={openMenu}
+      onLogout={logout}
+      darkMode={darkMode}
+      onToggleDarkMode={toggleDarkMode}
+      mobileMenuOpen={mobileMenuOpen}
+      setMobileMenuOpen={setMobileMenuOpen}
+      notifications={portalNotifications}
+      unreadNotificationCount={portalNotifications.filter((item) => !item.read_at && !item.resolved_at).length}
+      notificationToast={notificationToast}
+      onNotificationsViewed={() => { void markPortalNotificationsRead(); }}
+      onDismissNotificationToast={() => {
+        if (notificationToastTimerRef.current) window.clearTimeout(notificationToastTimerRef.current);
+        notificationToastTimerRef.current = null;
+        setNotificationToast(null);
+      }}
+    >
           {activeMenu === "Profil Saya" && (
             <div className="mx-auto max-w-5xl space-y-6">
               <div className="overflow-hidden rounded-3xl bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-900 p-6 text-white shadow-xl sm:p-8">
@@ -5594,210 +6098,42 @@ if (!loggedIn) {
           )}
 
           {activeMenu === "Dashboard" && (
-            <>
-              {(role === "Siswa" || role === "Orang Tua") ? (
-                <>
-                  <div className="mb-6 rounded-3xl bg-gradient-to-r from-emerald-700 via-emerald-600 to-teal-500 p-6 text-white shadow-sm">
-                    <p className="text-sm text-emerald-100">
-                      {role === "Orang Tua" ? "Ringkasan belajar anak" : "Ringkasan belajar Anda"}
-                    </p>
-                    <h1 className="mt-1 text-2xl font-bold">{dashboardChild?.nama ?? name} 👋</h1>
-                    <p className="mt-2 text-sm text-emerald-100">
-                      {dashboardChild ? `Kelas ${dashboardChild.kelas} • NIS ${dashboardChild.nis}` : "Memuat data belajar..."}
-                    </p>
-                  </div>
+            (role === "Siswa" || role === "Orang Tua") ? (
+              <StudentDashboard
+                role={role}
+                name={name}
+                selectedSemester={selectedSemester}
+                dashboardChild={dashboardChild}
+                dashboardError={dashboardError}
+                dashboardLoading={dashboardLoading}
+                dashboardAverage={dashboardAverage}
+                dashboardLearning={dashboardLearning}
+                dashboardAttendance={dashboardAttendance}
+                dashboardOutstanding={dashboardOutstanding}
+                onOpenMenu={openMenu}
+              />
+            ) : (
+              <StaffDashboard
+                name={name}
+                role={role}
+                currentUserId={currentUserId}
+                dashboardLoading={dashboardLoading}
+                dashboardSchoolStats={dashboardSchoolStats}
+                activityRows={activityRows}
+                onCreateAnnouncement={createSchoolAnnouncement}
+                onOpenMenu={openMenu}
+                onOpenTeacherLesson={openTeacherLessonAction}
+              />
+            )
+          )}
 
-                  {dashboardError && (
-                    <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-                      Gagal memuat ringkasan dashboard: {dashboardError}
-                    </div>
-                  )}
-
-                  {dashboardLoading ? (
-                    <div className="rounded-2xl border bg-white p-8 text-center text-sm text-gray-500">Memuat ringkasan hasil belajar...</div>
-                  ) : (
-                    <>
-                      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                        <div className="rounded-2xl border bg-white p-5 shadow-sm">
-                          <p className="text-sm text-gray-500">Rata-rata Nilai</p>
-                          <p className="mt-2 text-3xl font-bold text-emerald-700">{dashboardAverage ?? "-"}</p>
-                          <p className="mt-1 text-xs text-gray-400">Semester {selectedSemester}</p>
-                        </div>
-                        <div className="rounded-2xl border bg-white p-5 shadow-sm">
-                          <p className="text-sm text-gray-500">Mapel Dinilai</p>
-                          <p className="mt-2 text-3xl font-bold">{dashboardLearning.length}</p>
-                          <p className="mt-1 text-xs text-gray-400">Data nilai yang tersedia</p>
-                        </div>
-                        <div className="rounded-2xl border bg-white p-5 shadow-sm">
-                          <p className="text-sm text-gray-500">Kehadiran</p>
-                          <p className="mt-2 text-3xl font-bold text-blue-700">
-                            {dashboardAttendance && (dashboardAttendance.hadir + dashboardAttendance.izin + dashboardAttendance.sakit + dashboardAttendance.alpa) > 0
-                              ? `${Math.round((dashboardAttendance.hadir / (dashboardAttendance.hadir + dashboardAttendance.izin + dashboardAttendance.sakit + dashboardAttendance.alpa)) * 100)}%`
-                              : "-"}
-                          </p>
-                          <p className="mt-1 text-xs text-gray-400">Berdasarkan absensi tersimpan</p>
-                        </div>
-                        <div className="rounded-2xl border bg-white p-5 shadow-sm">
-                          <p className="text-sm text-gray-500">Tagihan Belum Dibayar</p>
-                          <p className="mt-2 text-2xl font-bold text-orange-600">
-                            {dashboardOutstanding === null ? "-" : `Rp ${dashboardOutstanding.toLocaleString("id-ID")}`}
-                          </p>
-                          <p className="mt-1 text-xs text-gray-400">Ringkasan administrasi</p>
-                        </div>
-                      </div>
-
-                      <div className="mt-6 grid gap-6 xl:grid-cols-3">
-                        <div className="rounded-2xl border bg-white p-6 xl:col-span-2">
-                          <div className="flex items-start justify-between gap-4">
-                            <div>
-                              <h3 className="font-bold">Grafik Hasil Belajar</h3>
-                              <p className="text-sm text-gray-500">Nilai akhir per mata pelajaran semester {selectedSemester}</p>
-                            </div>
-                            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">0–100</span>
-                          </div>
-
-                          {dashboardLearning.length === 0 ? (
-                            <div className="mt-8 rounded-xl bg-gray-50 p-6 text-center text-sm text-gray-500">
-                              Belum ada nilai yang tersimpan untuk semester ini.
-                            </div>
-                          ) : (
-                            <div className="mt-6 space-y-4">
-                              {dashboardLearning.map((item) => (
-                                <div key={item.code || item.subject}>
-                                  <div className="mb-1 flex items-center justify-between gap-3 text-sm">
-                                    <span className="font-semibold text-gray-700">{item.subject}</span>
-                                    <span className="font-bold text-emerald-700">{item.nilai}</span>
-                                  </div>
-                                  <div className="h-3 overflow-hidden rounded-full bg-gray-100">
-                                    <div
-                                      className="h-full rounded-full bg-emerald-500 transition-all"
-                                      style={{ width: `${Math.max(0, Math.min(100, item.nilai))}%` }}
-                                    />
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="rounded-2xl border bg-white p-6">
-                          <h3 className="font-bold">Ringkasan Kehadiran</h3>
-                          <p className="text-sm text-gray-500">Rekap absensi yang tersimpan</p>
-                          <div className="mt-5 space-y-3">
-                            {[
-                              ["Hadir", dashboardAttendance?.hadir ?? 0, "bg-emerald-50 text-emerald-700"],
-                              ["Izin", dashboardAttendance?.izin ?? 0, "bg-blue-50 text-blue-700"],
-                              ["Sakit", dashboardAttendance?.sakit ?? 0, "bg-yellow-50 text-yellow-700"],
-                              ["Alpa", dashboardAttendance?.alpa ?? 0, "bg-red-50 text-red-700"],
-                            ].map(([label, value, cls]) => (
-                              <div key={String(label)} className={`flex items-center justify-between rounded-xl px-4 py-3 ${cls}`}>
-                                <span className="text-sm font-semibold">{label}</span>
-                                <span className="font-bold">{value}</span>
-                              </div>
-                            ))}
-                          </div>
-                          <div className="mt-5 rounded-xl bg-gray-50 p-4 text-sm text-gray-600">
-                            <p className="font-semibold text-gray-800">💡 Fokus belajar</p>
-                            <p className="mt-1">Gunakan grafik nilai untuk melihat mapel yang perlu dipertahankan atau ditingkatkan.</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-6 grid gap-4 sm:grid-cols-3">
-                        <button type="button" onClick={() => openMenu("Nilai & Raport")} className="rounded-2xl border bg-white p-5 text-left shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50">
-                          <p className="text-2xl">📊</p>
-                          <p className="mt-2 font-bold">Lihat Nilai</p>
-                          <p className="mt-1 text-xs text-gray-500">Detail nilai per mata pelajaran</p>
-                        </button>
-                        <button type="button" onClick={() => openMenu("Absensi")} className="rounded-2xl border bg-white p-5 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50">
-                          <p className="text-2xl">📋</p>
-                          <p className="mt-2 font-bold">Lihat Absensi</p>
-                          <p className="mt-1 text-xs text-gray-500">Cek riwayat kehadiran</p>
-                        </button>
-                        <button type="button" onClick={() => openMenu("SPP & Administrasi")} className="rounded-2xl border bg-white p-5 text-left shadow-sm transition hover:border-orange-300 hover:bg-orange-50">
-                          <p className="text-2xl">💳</p>
-                          <p className="mt-2 font-bold">Administrasi</p>
-                          <p className="mt-1 text-xs text-gray-500">Lihat status tagihan sekolah</p>
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </>
-              ) : (
-                <>
-                  <div className="relative mb-7 overflow-hidden rounded-2xl bg-slate-900 p-7 text-white shadow-xl shadow-slate-200">
-                    <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full bg-emerald-400/20 blur-2xl" />
-                    <div className="absolute -bottom-24 right-24 h-48 w-48 rounded-full bg-cyan-400/10 blur-3xl" />
-                    <div className="relative">
-                      <p className="text-sm font-medium text-slate-300">Selamat datang kembali,</p>
-                      <h1 className="mt-1 text-2xl font-bold tracking-tight">{name} 👋</h1>
-                      <p className="mt-2 max-w-xl text-sm leading-6 text-slate-300">
-                        Anda masuk sebagai {role}. Berikut ringkasan aktivitas akademik sekolah hari ini.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <StatCard
-                      title={role === "Guru" ? "Siswa Kelas Saya" : "Total Siswa"}
-                      value={dashboardLoading ? "…" : String(dashboardSchoolStats.totalSiswa)}
-                      detail={role === "Guru" ? "Siswa dari kelas yang diampu" : "Data siswa dari Supabase"}
-                      icon="students"
-                    />
-                    <StatCard
-                      title="Total Guru"
-                      value={dashboardLoading ? "…" : String(dashboardSchoolStats.totalGuru)}
-                      detail="Data guru dari master sekolah"
-                      icon="teachers"
-                    />
-                    <StatCard
-                      title={role === "Guru" ? "Kelas Saya" : "Rombel"}
-                      value={dashboardLoading ? "…" : String(dashboardSchoolStats.totalRombel)}
-                      detail={role === "Guru" ? "Kelas yang ditugaskan" : "Kelas dari database"}
-                      icon="dashboard"
-                    />
-                    <StatCard
-                      title="Kehadiran Hari Ini"
-                      value={dashboardLoading ? "…" : dashboardSchoolStats.attendancePercent == null ? "—" : `${dashboardSchoolStats.attendancePercent}%`}
-                      detail={dashboardSchoolStats.attendanceTotal > 0 ? `${dashboardSchoolStats.attendancePresent} dari ${dashboardSchoolStats.attendanceTotal} catatan absensi` : "Belum ada absensi hari ini"}
-                      icon="attendance"
-                    />
-                  </div>
-
-                  <div className="mt-7 grid gap-6 xl:grid-cols-3">
-                    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm xl:col-span-2">
-                      <div>
-                        <h3 className="font-bold">Ringkasan Kehadiran</h3>
-                        <p className="text-sm text-gray-500">Data kehadiran hari ini</p>
-                      </div>
-                      <div className="mt-6 grid gap-4 sm:grid-cols-3">
-                        <Attendance title="Siswa Hadir" value={dashboardSchoolStats.attendancePercent == null ? "—" : `${dashboardSchoolStats.attendancePercent}%`} />
-                        <Attendance title="Catatan Absensi" value={String(dashboardSchoolStats.attendanceTotal)} />
-                        <Attendance title="Hadir" value={String(dashboardSchoolStats.attendancePresent)} />
-                      </div>
-                    </div>
-                    <div className="rounded-2xl border bg-white p-6">
-                      <h3 className="font-bold">Aktivitas Terbaru</h3>
-                      <div className="mt-4 space-y-4">
-                        {activityRows.length === 0 ? (
-                          <p className="text-sm text-gray-500">Belum ada aktivitas tercatat.</p>
-                        ) : activityRows.map((item) => (
-                          <Activity
-                            key={item.id}
-                            title={`${item.actor_name || "Pengguna"} ${item.action}${item.target_name ? ` — ${item.target_name}` : ""}`}
-                            time={new Date(item.created_at).toLocaleTimeString("id-ID", {
-                              timeZone: "Asia/Jakarta",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
-            </>
+          {activeMenu === "Kalender Akademik" && (role === "Admin" || role === "Kepala Sekolah" || role === "Guru") && (
+            <Section title="Kalender Akademik SD" subtitle="Kalender Pendidikan Provinsi Jawa Barat · Tahun Ajaran 2026/2027 · Juli 2026–Juli 2027.">
+              <AcademicCalendarView
+                events={dashboardSchoolStats.schoolEvents ?? []}
+                onRefresh={loadAcademicCalendar}
+              />
+            </Section>
           )}
 
           {activeMenu === "Data Siswa" && (
@@ -8599,81 +8935,8 @@ if (!loggedIn) {
               </div>
             </Section>
           )}
-        </div>
-      </main>
-    </div>
+    </DashboardShell>
     </>
-  );
-}
-
-function StatCard({
-  title,
-  value,
-  detail,
-  icon,
-}: {
-  title: string;
-  value: string;
-  detail: string;
-  icon: string;
-}) {
-  return (
-    <div className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{title}</p>
-          <p className="mt-2 text-3xl font-bold tracking-tight text-slate-900">{value}</p>
-          <p className="mt-2 text-xs text-slate-500">{detail}</p>
-        </div>
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-lg transition group-hover:bg-slate-900 group-hover:text-white">
-          <MenuIcon name={icon as MenuIconName} size={19} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Attendance({
-  title,
-  value,
-}: {
-  title: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-xl bg-gray-50 p-4">
-      <p className="text-sm text-gray-500">
-        {title}
-      </p>
-
-      <p className="mt-1 text-2xl font-bold text-emerald-600">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function Activity({
-  title,
-  time,
-}: {
-  title: string;
-  time: string;
-}) {
-  return (
-    <div className="flex items-center gap-3">
-      <div className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-
-      <div className="flex-1">
-        <p className="text-sm font-medium">
-          {title}
-        </p>
-
-        <p className="text-xs text-gray-400">
-          {time}
-        </p>
-      </div>
-    </div>
   );
 }
 
