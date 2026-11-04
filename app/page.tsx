@@ -74,10 +74,11 @@ function EmployeeQrScanner({ onScan }: { onScan: (token: string) => void }) {
           // Bentuk constraint standar html5-qrcode; browser memilih kamera belakang.
           { facingMode: "environment" },
           {
-            fps: 10,
+            // Area pemindaian lebih besar agar QR kecil pada kartu lebih mudah terbaca.
+            fps: 15,
             qrbox: (width: number, height: number) => {
-              const side = Math.max(100, Math.floor(Math.min(width, height) * 0.7));
-              const safeSide = Math.min(side, width, height);
+              const side = Math.floor(Math.min(width, height) * 0.9);
+              const safeSide = Math.min(Math.max(140, side), width, height);
               return { width: safeSide, height: safeSide };
             },
             disableFlip: true,
@@ -3685,17 +3686,27 @@ export default function Home() {
           accuracy: position.coords.accuracy,
         }),
         (error) => reject(new Error(error.code === 1 ? "Izin lokasi ditolak. Aktifkan izin lokasi untuk SIAKAD." : error.code === 2 ? "Lokasi tidak dapat ditemukan. Aktifkan GPS lalu coba lagi." : "Permintaan lokasi terlalu lama. Coba lagi di area terbuka.")),
-        { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 10000 }
       );
     });
 
   const getApproximateAddress = async (latitude: number, longitude: number) => {
     try {
       // Koordinat dikirim ke layanan OpenStreetMap Nominatim untuk mencari alamat perkiraan.
-      const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`, { headers: { Accept: "application/json" } });
-      if (!response.ok) return "Alamat tidak tersedia; koordinat tersimpan";
-      const data = await response.json();
-      return typeof data.display_name === "string" ? data.display_name : "Alamat tidak tersedia; koordinat tersimpan";
+      // Jangan biarkan layanan alamat yang lambat menahan proses absensi terlalu lama.
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 2500);
+      try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`, {
+          headers: { Accept: "application/json" },
+          signal: controller.signal,
+        });
+        if (!response.ok) return "Alamat tidak tersedia; koordinat tersimpan";
+        const data = await response.json();
+        return typeof data.display_name === "string" ? data.display_name : "Alamat tidak tersedia; koordinat tersimpan";
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
     } catch {
       return "Alamat tidak tersedia; koordinat tersimpan";
     }

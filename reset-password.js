@@ -9,8 +9,8 @@ const supabase = createClient(
 async function resetPassword() {
   const { data, error } =
     await supabase.auth.admin.updateUserById(
-      "fbda56b5-fcab-43bd-a0fe-26901ca36526",
-      { password: "23091998" }
+      "418e3a7a-ac1a-483d-afc5-b77b6e9f2f9a",
+      { password: "@SDIslamAlb_1426" }
     );
 
   if (error) {

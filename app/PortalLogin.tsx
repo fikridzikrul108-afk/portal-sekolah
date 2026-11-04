@@ -48,7 +48,7 @@ export default function PortalLogin({
       case "siswa":
         return {
           title: "Mode Akses: Siswa / Wali",
-          desc: "Hak akses terisolasi untuk pantauan akademik, raport, dan info SPP santri.",
+          desc: "Hak akses terisolasi untuk pantauan akademik, raport, dan info SPP siswa.",
           label: "NIS Siswa / Email Orang Tua",
           placeholder: "Contoh: 20261042 atau email@wali.id",
           helper: "Gunakan NIS siswa atau surel orang tua yang terdaftar di TU",
@@ -502,8 +502,8 @@ export default function PortalLogin({
 
           <div className="anim-stagger-2">
             <h2 className="hero-title">
-              satu layanan<br />
-              <span style={{ color: "#cbe3ff" }}>semua kemudahan</span>
+              Satu Layanan<br />
+              <span style={{ color: "#cbe3ff" }}>Semua Kemudahan</span>
             </h2>
           </div>
 
