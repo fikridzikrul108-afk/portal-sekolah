@@ -1,4 +1,3 @@
-
 import type { Metadata, Viewport } from "next";
 import { Poppins } from "next/font/google";
 import "./globals.css";
@@ -12,8 +11,7 @@ const font = Poppins({
 
 export const metadata: Metadata = {
   title: "Portal Akademik - SD Islam Al-Barkah",
-  description:
-    "Portal akademik dan manajemen sekolah SD Islam Al-Barkah",
+  description: "Portal akademik dan manajemen sekolah SD Islam Al-Barkah",
   applicationName: "Portal Akademik SD Islam Al-Barkah",
   manifest: "/manifest.webmanifest",
   icons: {
@@ -43,16 +41,17 @@ export const metadata: Metadata = {
     ],
   },
   appleWebApp: {
-  capable: true,
-  statusBarStyle: "black-translucent",
-  title: "Portal Akademik SD Islam Al-Barkah",
-},
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Portal Akademik SD Islam Al-Barkah",
+  },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0f766e",
+  themeColor: "#075bd8",
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
