@@ -149,7 +149,7 @@ export default function StudentDashboard({
                       </div>
 
                       <div className="mt-6 grid gap-4 sm:grid-cols-3">
-                        <button type="button" onClick={() => openMenu("Nilai & Raport")} className="rounded-2xl border bg-white p-5 text-left shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50">
+                        <button type="button" onClick={() => openMenu("Nilai")} className="rounded-2xl border bg-white p-5 text-left shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50">
                           <p className="text-2xl">📊</p>
                           <p className="mt-2 font-bold">Lihat Nilai</p>
                           <p className="mt-1 text-xs text-gray-500">Detail nilai per mata pelajaran</p>

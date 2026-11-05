@@ -568,6 +568,7 @@ type GradeDraft = {
   nilaiAkhir: string;
   catatanTpTertinggi: string;
   catatanTpTerendah: string;
+  deskripsiCapaian: string;
   sumatif: SumatifDraft[];
 };
 
@@ -603,7 +604,6 @@ const SCHOOL_REPORT_SUBJECT_NAMES = new Set([
   "Pendidikan Agama Islam",
   "PP",
   "Seni",
-  "Pramuka",
 ]);
 const normalizeReportSubjectName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
 const isMadinReportSubject = (name: string) => MADIN_SUBJECT_NAMES.has(name) || normalizeReportSubjectName(name) === "btq";
@@ -643,6 +643,7 @@ type ReportCardDraft = {
   izin: string;
   tanpaKeterangan: string;
   catatanWaliKelas: string;
+  kokurikuler: string;
   keteranganNaikKelas: string;
   keteranganLulus: string;
   tanggalRaport: string;
@@ -1217,6 +1218,12 @@ export default function Home() {
   const [selectedGradeClassId, setSelectedGradeClassId] = useState("");
   const [selectedGradeSubjectId, setSelectedGradeSubjectId] = useState("");
   const [gradeDrafts, setGradeDrafts] = useState<Record<string, GradeDraft>>({});
+  const [selectedTahfidzStudentId, setSelectedTahfidzStudentId] = useState("");
+  const [tahfidzStudentSearch, setTahfidzStudentSearch] = useState("");
+  const [tahfidzSetoranRows, setTahfidzSetoranRows] = useState<any[]>([]);
+  const [tahfidzSetoranForm, setTahfidzSetoranForm] = useState({ tanggal: new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" }), namaSurat: "", status: "Tuntas" as "Tuntas" | "Ulang", nilai: "", predikat: "", catatan: "" });
+  const [tahfidzSetoranSaving, setTahfidzSetoranSaving] = useState(false);
+  const [tahfidzSetoranError, setTahfidzSetoranError] = useState("");
   const [gradeLoading, setGradeLoading] = useState(false);
   const [gradeSaving, setGradeSaving] = useState(false);
   const [gradeSaved, setGradeSaved] = useState(false);
@@ -1232,7 +1239,8 @@ export default function Home() {
   const [reportGrades, setReportGrades] = useState<ReportGradeSummary[]>([]);
   const [reportDescriptionLoading, setReportDescriptionLoading] = useState(false);
   const [reportExtracurricular, setReportExtracurricular] = useState<ReportExtracurricular[]>([
-    { nama: "", predikat: "", keterangan: "" },
+    { nama: "Pramuka", predikat: "", keterangan: "" },
+    { nama: "Pencak Silat", predikat: "", keterangan: "" },
   ]);
   const [reportAttendanceLoading, setReportAttendanceLoading] = useState(false);
   const [sppBills, setSppBills] = useState<SppBill[]>([]);
@@ -1439,6 +1447,7 @@ export default function Home() {
     headers: string[],
     rows: (string | number)[][],
     teacherLabel = name || "Guru Mata Pelajaran",
+    subjectOverride?: string,
   ) => {
     const printWindow = window.open("", "_blank");
     if (!printWindow) {
@@ -1451,19 +1460,19 @@ export default function Home() {
     const tableHead = headers.map((h) => `<th>${esc(h)}</th>`).join("");
     const tableRows = rows.map((row) => `<tr>${row.map((cell) => `<td>${esc(cell)}</td>`).join("")}</tr>`).join("");
     const school = schoolSettings.namaSekolah || "SD Islam Al-Barkah";
-    const subject = title.includes("Remedial") ? "Berbagai Mata Pelajaran"
+    const subject = subjectOverride || (title.includes("Remedial") ? "Berbagai Mata Pelajaran"
       : title.includes("Bimbingan Konseling") ? "Bimbingan Konseling"
-      : journalSubjectOptions.find((item) => item.id === journalSubjectId)?.name || "Berbagai Mata Pelajaran";
+      : journalSubjectOptions.find((item) => item.id === journalSubjectId)?.name || "Berbagai Mata Pelajaran");
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
       <style>
-      @page{size:A4 landscape;margin:12mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172033;font-size:10px}
-      h1{text-align:center;color:#176d68;font-size:20px;margin:0 0 5px}
-      .meta{text-align:center;font-size:11px;margin-bottom:18px;color:#475569}
-      table{width:100%;border-collapse:collapse;table-layout:auto}
-      th,td{border:1px solid #9aa7b4;padding:6px 5px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+      @page{size:A4 landscape;margin:8mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172033;font-size:9px;margin:0}
+      h1{text-align:center;color:#176d68;font-size:18px;margin:0 0 3px}
+      .meta{text-align:center;font-size:10px;margin-bottom:9px;color:#475569}
+      table{width:100%;border-collapse:collapse;table-layout:fixed}
+      th,td{border:1px solid #9aa7b4;padding:3px 4px;text-align:left;vertical-align:top;overflow-wrap:anywhere;font-size:8px}
       th{background:#dff4f1;text-align:center;font-weight:bold}
-      .signatures{display:flex;justify-content:space-between;margin-top:38px;page-break-inside:avoid}
-      .sign{width:38%;text-align:center;min-height:75px}.line{margin-top:45px;border-top:1px solid #333;padding-top:5px}
+      .signatures{display:flex;justify-content:space-between;margin-top:12px;page-break-inside:avoid;break-inside:avoid}
+      .sign{width:28%;text-align:center;min-height:48px;font-size:9px}.line{width:72%;margin:24px auto 0;border-top:1px solid #333;padding-top:4px}
       .print-note{text-align:center;color:#64748b;font-size:9px;margin-top:12px}
       @media print{.print-note{display:none}}
       </style></head><body><h1>${esc(title)}</h1>
@@ -1793,6 +1802,7 @@ export default function Home() {
     nilaiAkhir: "",
     catatanTpTertinggi: "",
     catatanTpTerendah: "",
+    deskripsiCapaian: "",
     sumatif: [{ materi: "", tujuanPembelajaran: "", nilai: "" }],
   });
 
@@ -2105,7 +2115,7 @@ export default function Home() {
 
     let gradeQuery = supabase
       .from("grades")
-      .select("id, student_id, nilai_sas, nilai_uts_pts, nilai_non_tes, nilai_akhir, catatan_tp_tertinggi, catatan_tp_terendah, keterangan")
+      .select("id, student_id, nilai_sas, nilai_uts_pts, nilai_non_tes, nilai_akhir, catatan_tp_tertinggi, catatan_tp_terendah, keterangan, deskripsi_capaian")
       .eq("class_id", classId)
       .eq("subject_id", subjectId)
       .eq("semester", Number(semester))
@@ -2176,6 +2186,7 @@ export default function Home() {
         nilaiAkhir: existing?.nilai_akhir != null ? String(existing.nilai_akhir) : "",
         catatanTpTertinggi: existing?.catatan_tp_tertinggi ?? "",
         catatanTpTerendah: existing?.catatan_tp_terendah ?? "",
+        deskripsiCapaian: existing?.deskripsi_capaian ?? "",
         sumatif: details.length > 0
           ? details.map((row) => ({
               materi: row.materi ?? "",
@@ -2189,6 +2200,59 @@ export default function Home() {
     setGradeDrafts(nextDrafts);
     setGradeSaved(false);
     setGradeLoading(false);
+  };
+
+  const loadTahfidzSetoran = async (studentId: string, semesterValue = selectedSemester) => {
+    setSelectedTahfidzStudentId(studentId);
+    setTahfidzSetoranError("");
+    if (!studentId) { setTahfidzSetoranRows([]); return; }
+    const { data, error } = await supabase
+      .from("tahfidz_setoran")
+      .select("id, student_id, tanggal, nama_surat, status, nilai, predikat, catatan")
+      .eq("student_id", studentId)
+      .eq("semester", Number(semesterValue))
+      .eq("tahun_ajaran", gradeClasses.find((item) => item.id === selectedGradeClassId)?.tahunAjaran ?? "2026/2027")
+      .order("tanggal", { ascending: false });
+    if (error) {
+      setTahfidzSetoranRows([]);
+      setTahfidzSetoranError(`Gagal memuat riwayat setoran Tahfidz: ${error.message}. Pastikan migrasi tabel tahfidz_setoran sudah dijalankan.`);
+      return;
+    }
+    setTahfidzSetoranRows(data ?? []);
+  };
+
+  const saveTahfidzSetoran = async () => {
+    if (!selectedTahfidzStudentId || !currentUserId) { alert("Pilih siswa terlebih dahulu."); return; }
+    if (!tahfidzSetoranForm.tanggal || !tahfidzSetoranForm.namaSurat.trim()) { alert("Tanggal dan nama surat wajib diisi."); return; }
+    const nilai = tahfidzSetoranForm.nilai === "" ? null : Number(tahfidzSetoranForm.nilai);
+    if (nilai !== null && (!Number.isFinite(nilai) || nilai < 0 || nilai > 100)) { alert("Nilai harus berada pada rentang 0 sampai 100."); return; }
+    const classRow = gradeClasses.find((item) => item.id === selectedGradeClassId);
+    setTahfidzSetoranSaving(true);
+    setTahfidzSetoranError("");
+    const { error } = await supabase.from("tahfidz_setoran").insert({
+      student_id: selectedTahfidzStudentId,
+      class_id: selectedGradeClassId,
+      teacher_id: currentUserId,
+      tanggal: tahfidzSetoranForm.tanggal,
+      nama_surat: tahfidzSetoranForm.namaSurat.trim(),
+      status: tahfidzSetoranForm.status,
+      nilai,
+      predikat: tahfidzSetoranForm.predikat.trim() || null,
+      catatan: tahfidzSetoranForm.catatan.trim() || null,
+      semester: Number(selectedSemester),
+      tahun_ajaran: classRow?.tahunAjaran ?? "2026/2027",
+    });
+    setTahfidzSetoranSaving(false);
+    if (error) { setTahfidzSetoranError(`Setoran gagal disimpan: ${error.message}`); return; }
+    setTahfidzSetoranForm({ tanggal: new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" }), namaSurat: "", status: "Tuntas", nilai: "", predikat: "", catatan: "" });
+    await loadTahfidzSetoran(selectedTahfidzStudentId);
+  };
+
+  const deleteTahfidzSetoran = async (id: string) => {
+    if (!canEditGrades || !window.confirm("Hapus catatan setoran hafalan ini?")) return;
+    const { error } = await supabase.from("tahfidz_setoran").delete().eq("id", id);
+    if (error) { setTahfidzSetoranError(`Setoran gagal dihapus: ${error.message}`); return; }
+    await loadTahfidzSetoran(selectedTahfidzStudentId);
   };
 
   const updateGradeDraft = (studentId: string, patch: Partial<GradeDraft>) => {
@@ -2283,7 +2347,12 @@ export default function Home() {
     setGradeSaving(true);
     setGradeError("");
 
-    for (const student of gradeStudents) {
+    const selectedSubjectForSave = gradeSubjects.find((subject) => subject.id === selectedGradeSubjectId);
+    const isTahfidzSubjectForSave = normalizeReportSubjectName(selectedSubjectForSave?.name ?? "").includes("tahfidz");
+    const studentsToSave = isTahfidzSubjectForSave ? gradeStudents.filter((student) => student.id === selectedTahfidzStudentId) : gradeStudents;
+    if (isTahfidzSubjectForSave && studentsToSave.length === 0) { setGradeSaving(false); alert("Pilih siswa Tahfidz terlebih dahulu."); return; }
+
+    for (const student of studentsToSave) {
       const draft = gradeDrafts[student.id] ?? emptyGradeDraft(student.id);
       const nilaiSas = draft.nilaiSas === "" ? null : Number(draft.nilaiSas);
       const nilaiUtsPts = draft.nilaiUtsPts === "" ? null : Number(draft.nilaiUtsPts);
@@ -2311,6 +2380,7 @@ export default function Home() {
             nilai_akhir: nilaiAkhir,
             catatan_tp_tertinggi: draft.catatanTpTertinggi || null,
             catatan_tp_terendah: draft.catatanTpTerendah || null,
+            deskripsi_capaian: draft.deskripsiCapaian || null,
           })
           .eq("id", gradeId);
 
@@ -2336,6 +2406,7 @@ export default function Home() {
             tahun_ajaran: tahunAjaran,
             catatan_tp_tertinggi: draft.catatanTpTertinggi || null,
             catatan_tp_terendah: draft.catatanTpTerendah || null,
+            deskripsi_capaian: draft.deskripsiCapaian || null,
           })
           .select("id")
           .single();
@@ -2355,6 +2426,7 @@ export default function Home() {
 
       if (!gradeId) continue;
 
+      if (!isTahfidzSubjectForSave) {
       const validDetails = draft.sumatif.filter(
         (item) => item.materi.trim() || item.tujuanPembelajaran.trim() || item.nilai !== ""
       );
@@ -2398,6 +2470,7 @@ export default function Home() {
           return;
         }
       }
+      }
     }
 
     setGradeSaving(false);
@@ -2411,6 +2484,7 @@ export default function Home() {
     izin: "0",
     tanpaKeterangan: "0",
     catatanWaliKelas: "",
+    kokurikuler: "",
     keteranganNaikKelas: "",
     keteranganLulus: "",
     tanggalRaport: "",
@@ -2486,7 +2560,7 @@ export default function Home() {
       setReportDraft(null);
       setReportGrades([]);
       setReportDescriptionLoading(false);
-      setReportExtracurricular([{ nama: "", predikat: "", keterangan: "" }]);
+      setReportExtracurricular([{ nama: "Pramuka", predikat: "", keterangan: "" }, { nama: "Pencak Silat", predikat: "", keterangan: "" }]);
       return;
     }
 
@@ -2608,20 +2682,12 @@ export default function Home() {
         sumatif: details,
       };
     }));
-    const pencakGrade = (gradeRows ?? [])
-      .map((row: any) => ({
-        name: row.subjects?.nama ?? "",
-        nilaiAkhir: hitungNilaiAkhir(row.nilai_non_tes, row.nilai_uts_pts, row.nilai_sas) ?? (row.nilai_akhir == null ? null : Number(row.nilai_akhir)),
-        deskripsi: row.deskripsi_capaian ?? "",
-      }))
-      .find((row) => isPencakSilatSubject(row.name));
+    const savedPramuka = (extraRows ?? []).find((row: any) => normalizeReportSubjectName(row.nama ?? "") === "pramuka");
     const savedPencak = (extraRows ?? []).find((row: any) => isPencakSilatSubject(row.nama ?? ""));
-    setReportExtracurricular([{
-      id: savedPencak?.id,
-      nama: "Pencak Silat",
-      predikat: savedPencak?.predikat ?? getPredikatNilai(pencakGrade?.nilaiAkhir ?? null),
-      keterangan: savedPencak?.keterangan ?? pencakGrade?.deskripsi ?? "",
-    }]);
+    setReportExtracurricular([
+      { id: savedPramuka?.id, nama: "Pramuka", predikat: "", keterangan: savedPramuka?.keterangan ?? "" },
+      { id: savedPencak?.id, nama: "Pencak Silat", predikat: "", keterangan: savedPencak?.keterangan ?? "" },
+    ]);
 
     if (!data) {
       setReportDraft(emptyReportDraft(studentId));
@@ -2633,6 +2699,7 @@ export default function Home() {
         izin: String(data.izin ?? 0),
         tanpaKeterangan: String(data.tanpa_keterangan ?? 0),
         catatanWaliKelas: data.catatan_wali_kelas ?? "",
+        kokurikuler: data.kokurikuler ?? "",
         keteranganNaikKelas: data.keterangan_naik_kelas ?? "",
         keteranganLulus: data.keterangan_lulus ?? "",
         tanggalRaport: data.tanggal_raport ?? "",
@@ -2680,7 +2747,7 @@ export default function Home() {
   };
 
   const updateReportExtracurricular = (index: number, patch: Partial<ReportExtracurricular>) => {
-    setReportExtracurricular((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch, nama: "Pencak Silat" } : item));
+    setReportExtracurricular((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
     setReportSaved(false);
   };
 
@@ -2745,32 +2812,7 @@ export default function Home() {
     setReportSaved(false);
   };
 
-  const generateReportDescriptions = () => {
-    if (reportGrades.length === 0) return;
-    setReportDescriptionLoading(true);
-    setReportGrades((current) => current.map((item) => {
-      const validDetails = item.sumatif.filter((detail) => detail.nilai != null);
-      const nilaiAkhir = item.nilaiAkhir;
-      const level = item.predikat === "A" ? "sangat baik" : item.predikat === "B" ? "baik" : item.predikat === "C" ? "cukup" : "yang masih perlu dikembangkan";
-      if (validDetails.length === 0) {
-        return { ...item, deskripsiCapaian: nilaiAkhir == null ? "Belum terdapat data capaian yang cukup untuk dideskripsikan." : `Menunjukkan capaian ${level} pada mata pelajaran ini dengan nilai akhir ${nilaiAkhir}.` };
-      }
-      const sorted = [...validDetails].sort((a, b) => (b.nilai ?? 0) - (a.nilai ?? 0));
-      const highest = sorted[0];
-      const lowest = sorted[sorted.length - 1];
-      const highestText = highest?.tujuanPembelajaran?.trim() || highest?.materi?.trim() || "materi yang dipelajari";
-      const lowestText = lowest?.tujuanPembelajaran?.trim() || lowest?.materi?.trim();
-      let description = `Menunjukkan capaian ${level}, terutama pada ${highestText} dengan nilai ${highest?.nilai ?? "-"}.`;
-      if (lowest && highest && lowest !== highest && lowest.nilai != null && lowest.nilai < 80 && lowestText) {
-        description += ` Capaian pada ${lowestText} dengan nilai ${lowest.nilai} masih perlu dikembangkan melalui latihan dan pendampingan yang konsisten.`;
-      } else {
-        description += " Mampu mengikuti pembelajaran dan menerapkan kompetensi yang dipelajari dengan baik.";
-      }
-      return { ...item, deskripsiCapaian: description };
-    }));
-    setReportDescriptionLoading(false);
-    setReportSaved(false);
-  };
+
 
   const getReportFileName = () => {
     const student = reportStudents.find((item) => item.id === reportDraft?.studentId);
@@ -2816,6 +2858,7 @@ export default function Home() {
       izin: Math.max(0, Number(reportDraft.izin) || 0),
       tanpa_keterangan: Math.max(0, Number(reportDraft.tanpaKeterangan) || 0),
       catatan_wali_kelas: reportDraft.catatanWaliKelas || null,
+      kokurikuler: reportDraft.kokurikuler || null,
       keterangan_naik_kelas: reportDraft.keteranganNaikKelas || null,
       keterangan_lulus: reportDraft.keteranganLulus || null,
       tanggal_raport: reportDraft.tanggalRaport || null,
@@ -2850,8 +2893,8 @@ export default function Home() {
     }
 
     const validExtra = reportExtracurricular
-      .filter((item) => isPencakSilatSubject(item.nama) || item.nama === "Pencak Silat")
-      .map((item) => ({ ...item, nama: "Pencak Silat" }));
+      .filter((item) => ["Pramuka", "Pencak Silat"].includes(item.nama) && item.keterangan.trim())
+      .map((item) => ({ ...item, predikat: "" }));
     const { error: deleteExtraError } = await supabase
       .from("report_card_extracurricular")
       .delete()
@@ -2869,25 +2912,13 @@ export default function Home() {
         .insert(validExtra.map((item) => ({
           report_card_id: reportId,
           nama: item.nama.trim(),
-          predikat: item.predikat || null,
+          predikat: null,
           keterangan: item.keterangan || null,
         })));
 
       if (insertExtraError) {
         setReportSaving(false);
         setReportError(`Gagal menyimpan ekstrakurikuler: ${insertExtraError.message}`);
-        return;
-      }
-    }
-
-    for (const grade of reportGrades) {
-      const { error: descriptionError } = await supabase
-        .from("grades")
-        .update({ deskripsi_capaian: grade.deskripsiCapaian || null })
-        .eq("id", grade.gradeId);
-      if (descriptionError) {
-        setReportSaving(false);
-        setReportError(`Gagal menyimpan deskripsi ${grade.subjectName}: ${descriptionError.message}`);
         return;
       }
     }
@@ -5753,8 +5784,24 @@ export default function Home() {
     setMobileMenuOpen(false);
     setNavigationLoading(true);
     setActiveMenu(menuName);
+    if (menuName === "Nilai") setGradeTab("input");
+    if (menuName === "Rapor") {
+      setGradeTab("raport");
+      setReportDraft(null);
+      setSelectedReportStudentId("");
+      const waliClassId = role === "Guru"
+        ? teacherAssignments.find((item) => item.isWaliKelas)?.classId
+        : undefined;
+      const reportClassId = isWaliKelas && waliClassId ? waliClassId : selectedGradeClassId;
+      const reportClass = gradeClasses.find((item) => item.id === reportClassId);
+      if (reportClassId) {
+        setSelectedGradeClassId(reportClassId);
+        setSelectedReportClass(reportClass?.nama ?? "");
+        void loadReportStudents(reportClassId);
+      }
+    }
 
-    if (menuName !== "Nilai & Raport") {
+    if (menuName !== "Nilai" && menuName !== "Rapor") {
       setSelectedSubject(null);
     }
 
@@ -5867,7 +5914,6 @@ export default function Home() {
   const reportSchoolGrades = reportGrades.filter((item) => isSchoolReportSubject(item.subjectName));
   const reportMadinGrades = reportGrades.filter((item) => isMadinReportSubject(item.subjectName));
   const reportActiveGrades = reportType === "school" ? reportSchoolGrades : reportMadinGrades;
-  const reportPencakSilatGrade = reportGrades.find((item) => isPencakSilatSubject(item.subjectName));
   const reportTitle = reportType === "school" ? "RAPOR SEKOLAH" : "RAPOR MADIN";
   const showReportDescription = reportType === "madin"
     ? reportMadinGrades.some((item) => normalizeReportSubjectName(item.subjectName) === "btq")
@@ -5919,7 +5965,7 @@ if (!loggedIn) {
         @keyframes welcomeOrbitReverse { from { transform: translate(-50%, -50%) rotate(360deg); } to { transform: translate(-50%, -50%) rotate(0deg); } }
         .printable-report { display: none; }
         @media print {
-          @page { size: A4 portrait; margin: 10mm; }
+          @page { size: A4 portrait; margin: 0; }
           html, body { background: #fff !important; }
           body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           body * { visibility: hidden !important; }
@@ -5930,7 +5976,7 @@ if (!loggedIn) {
             inset: 0 !important;
             width: 100% !important;
             margin: 0 !important;
-            padding: 0 !important;
+            padding: 12mm 12mm !important;
             background: #fff !important;
             color: #111 !important;
             font-family: Arial, Helvetica, sans-serif !important;
@@ -5938,12 +5984,31 @@ if (!loggedIn) {
           }
           .report-page {
             width: 100%;
-            min-height: 277mm;
+            min-height: 0;
             box-sizing: border-box;
             page-break-after: always;
             break-after: page;
           }
           .report-page:last-child { page-break-after: auto; break-after: auto; }
+          .report-madin-identity { width: 100%; border-collapse: collapse; margin: 8mm 0 7mm; font-family: Georgia, "Times New Roman", serif; font-size: 9pt; }
+          .report-madin-identity td { padding: 2px 3px; vertical-align: top; }
+          .report-madin-identity td:nth-child(1) { width: 24%; font-weight: 700; }
+          .report-madin-identity td:nth-child(2) { width: 3%; text-align: center; }
+          .report-madin-identity td:nth-child(3) { width: 34%; font-weight: 700; }
+          .report-madin-identity td:nth-child(4) { width: 18%; }
+          .report-madin-identity td:nth-child(5) { width: 3%; text-align: center; }
+          .report-madin-identity td:nth-child(6) { width: 18%; font-weight: 700; }
+          .report-madin-table { font-family: Georgia, "Times New Roman", serif; font-size: 8.5pt; border: 2px solid #111; }
+          .report-madin-table th, .report-madin-table td { padding: 4px 3px; border: 1px solid #111; }
+          .report-madin-table th { background: #dce8c4 !important; }
+          .report-madin-table tbody tr { height: 7mm; }
+          .report-madin-table .report-madin-summary td { border-top: 2px solid #111; }
+          .report-madin-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 10mm; margin: 8mm 6mm 0; font-family: Georgia, "Times New Roman", serif; font-size: 9pt; }
+          .report-madin-sign-left, .report-madin-sign-right { line-height: 1.8; }
+          .report-madin-sign-right { text-align: left; }
+          .report-madin-sign-space { height: 16mm; }
+          .report-madin-head { grid-column: 1 / -1; text-align: center; margin-top: 2mm; line-height: 1.8; }
+
           .report-header { display: flex; align-items: center; gap: 14px; padding-bottom: 9px; }
           .report-logo {
             width: 66px; height: 66px; flex: 0 0 66px;
@@ -5958,11 +6023,13 @@ if (!loggedIn) {
           .report-document-title { margin-top: 6px; font-size: 12pt; font-weight: 800; }
           .report-subtitle { margin-top: 2px; font-size: 8.5pt; }
           .report-title-line { border-top: 3px solid #111; border-bottom: 1px solid #111; height: 5px; margin-bottom: 12px; }
-          .report-identity { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 10pt; }
-          .report-identity td { padding: 3px 4px; vertical-align: top; }
-          .report-identity td:nth-child(1), .report-identity td:nth-child(3) { width: 18%; font-weight: 700; }
-          .report-identity td:nth-child(2) { width: 32%; }
-          .report-identity td:nth-child(4) { width: 32%; }
+          .report-identity { width: 100%; border-collapse: collapse; margin-bottom: 0; font-size: 10pt; }
+          .report-identity td { padding: 2px 4px; vertical-align: top; }
+          .report-identity td:nth-child(1), .report-identity td:nth-child(3) { width: 16%; font-weight: 400; }
+          .report-identity td:nth-child(2) { width: 34%; }
+          .report-identity td:nth-child(4) { width: 34%; }
+          .report-title-line { border-top: 1px solid #111; height: 0; margin: 8px 0 14px; }
+          .report-document-title-ak.hyar { text-align: center; font-size: 12pt; font-weight: 800; margin: 0 0 16px; }
           .report-section-title { margin: 12px 0 6px; font-size: 10.5pt; font-weight: 800; }
           .report-table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
           .report-table th, .report-table td { border: 1px solid #111; padding: 5px 6px; vertical-align: middle; }
@@ -5983,6 +6050,27 @@ if (!loggedIn) {
           .report-head-signature { width: 45%; margin: 12mm auto 0; }
           .report-footer { margin-top: 18mm; text-align: center; font-size: 8pt; color: #555; }
           .report-page-second { padding-top: 3mm; }
+          .report-identity-ak.hyar { margin: 0 0 7mm; font-size: 9pt; }
+          .report-identity-ak.hyar td:nth-child(1), .report-identity-ak.hyar td:nth-child(3) { width: 16%; }
+          .report-identity-ak.hyar td:nth-child(2) { width: 34%; }
+          .report-identity-ak.hyar td:nth-child(4) { width: 34%; }
+          .report-kokurikuler { min-height: 17mm; border: 1px solid #111; padding: 5px 7px; font-size: 9pt; }
+          .report-extra-table { margin-bottom: 5mm; }
+          .report-summary-grid { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 6mm; align-items: stretch; margin-top: 2mm; }
+          .report-attendance-full { width: 100%; }
+          .report-teacher-note { min-height: 0; margin: 0; }
+          .report-teacher-note .report-box-content { min-height: 19mm; }
+          .report-status-row { display: flex; gap: 8px; align-items: baseline; margin-top: 5mm; padding: 5px 7px; border: 1px solid #111; font-size: 9pt; }
+          .report-status-row strong { white-space: nowrap; }
+          .report-parent-response { border: 1px solid #111; margin-top: 4mm; min-height: 22mm; }
+          .report-parent-response .report-box-label { border-bottom: 1px solid #111; }
+          .report-parent-response-space { min-height: 14mm; }
+          .report-signature-grid { margin-top: 7mm; gap: 25mm; }
+          .report-signature-space { height: 14mm; }
+          .report-head-signature { margin-top: 5mm; }
+          .report-footer { margin-top: 7mm; font-size: 8pt; }
+          @page { size: A4 portrait; margin: 0; }
+          .report-table tr { break-inside: avoid; page-break-inside: avoid; }
         }
       `}</style>
     <DashboardShell
@@ -7047,19 +7135,12 @@ if (!loggedIn) {
             </Section>
           )}
 
-          {activeMenu === "Nilai & Raport" && (
+          {(activeMenu === "Nilai" || activeMenu === "Rapor") && (
             <Section
-              title="Nilai & Raport"
-              subtitle={role === "Siswa" || role === "Orang Tua" ? "Lihat nilai — data bersifat read-only" : "Input nilai oleh guru dan pengelolaan raport oleh Admin/Wali Kelas"}
+              title={activeMenu}
+              subtitle={activeMenu === "Rapor" ? "Pengelolaan dan penerbitan rapor siswa" : (role === "Siswa" || role === "Orang Tua" ? "Lihat nilai — data bersifat read-only" : "Input nilai per TP, Non-Tes, STS, dan SAS")}
             >
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3">
-                <div><p className="text-sm font-bold text-emerald-900">Export laporan</p><p className="text-xs text-emerald-700">Ambil data sesuai hak akses akun.</p></div>
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => exportGrades("excel")} className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100">📊 Excel</button>
-                  <button type="button" onClick={() => exportGrades("pdf")} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700">📄 PDF</button>
-                </div>
-              </div>
-              <div className="mb-6 flex flex-wrap gap-2 border-b border-gray-200 pb-3">
+              <div className="mb-6 hidden flex-wrap gap-2 border-b border-gray-200 pb-3">
                 <button
                   onClick={() => setGradeTab("input")}
                   className={`rounded-xl px-4 py-2 text-sm font-bold ${gradeTab === "input" ? "bg-emerald-600 text-white" : "bg-gray-100 text-gray-700"}`}
@@ -7097,7 +7178,7 @@ if (!loggedIn) {
                 )}
               </div>
 
-              {gradeTab === "input" ? (
+              {activeMenu === "Nilai" ? (
                 <>
                   <div className="mb-6 grid gap-4 md:grid-cols-3">
                     <div>
@@ -7112,6 +7193,8 @@ if (!loggedIn) {
                           setSelectedGradeSubjectId("");
                           setGradeStudents([]);
                           setGradeDrafts({});
+                          setSelectedTahfidzStudentId("");
+                          setTahfidzSetoranRows([]);
                           setGradeSaved(false);
                         }}
                         disabled={role === "Siswa" || role === "Orang Tua"}
@@ -7134,6 +7217,8 @@ if (!loggedIn) {
                           setGradeSaved(false);
                           if (selectedGradeClassId && selectedGradeSubjectId) {
                             await loadGradesForSelection(selectedGradeClassId, selectedGradeSubjectId, currentUserId, semester, role);
+                            const subjectName = gradeSubjects.find((item) => item.id === selectedGradeSubjectId)?.name ?? "";
+                            if (normalizeReportSubjectName(subjectName).includes("tahfidz") && selectedTahfidzStudentId) await loadTahfidzSetoran(selectedTahfidzStudentId, semester);
                           }
                         }}
                         className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
@@ -7172,6 +7257,8 @@ if (!loggedIn) {
                       onChange={async (e) => {
                         const id = e.target.value;
                         setSelectedGradeSubjectId(id);
+                        setSelectedTahfidzStudentId("");
+                        setTahfidzSetoranRows([]);
                         setGradeSaved(false);
                         if (id) {
                           await loadGradesForSelection(selectedGradeClassId, id, currentUserId, selectedSemester, role);
@@ -7222,183 +7309,126 @@ if (!loggedIn) {
                     <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-700">Belum ada siswa aktif pada kelas ini.</div>
                   )}
 
-                  {!gradeLoading && gradeStudents.length > 0 && (
-                    <div className="space-y-4">
-                      <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-5">
-                        <h3 className="font-bold text-gray-900">Komponen Nilai</h3>
-                        <p className="mt-1 text-sm text-gray-600">Isi Sumatif Materi, Non-Tes, SAS, dan catatan TP. Nilai Akhir disiapkan untuk dihitung dengan rumus sekolah setelah bobot final ditetapkan.</p>
-                      </div>
-
-                      {gradeStudents.map((student) => {
-                        const draft = gradeDrafts[student.id] ?? emptyGradeDraft(student.id);
-                        const expanded = expandedGradeStudent === student.id;
-                        return (
-                          <div key={student.id} className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-                            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                              <div>
-                                <p className="text-xs font-semibold text-emerald-600">NIS {student.nis}</p>
-                                <h4 className="mt-1 text-lg font-bold text-gray-900">{student.name}</h4>
-                              </div>
-                              <button
-                                onClick={() => setExpandedGradeStudent(expanded ? null : student.id)}
-                                className="rounded-xl border px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-50"
-                              >
-                                {expanded ? "Tutup Detail" : "Detail Sumatif Materi"}
-                              </button>
-                            </div>
-
-                            <div className="mt-5 grid gap-4 md:grid-cols-4">
-                              <div>
-                                <label className="mb-2 block text-xs font-semibold text-gray-600">Nilai Non-Tes</label>
-                                <input
-                                  type="number" min="0" max="100"
-                                  value={draft.nilaiNonTes}
-                                  disabled={!canEditGrades}
-                                  onChange={(e) => updateGradeDraft(student.id, { nilaiNonTes: e.target.value })}
-                                  className="w-full rounded-xl border px-3 py-2.5 outline-none focus:border-emerald-500"
-                                  placeholder="0-100"
-                                />
-                              </div>
-                              <div>
-                                <label className="mb-2 block text-xs font-semibold text-gray-600">Nilai UTS / PTS</label>
-                                <input
-                                  type="number" min="0" max="100"
-                                  value={draft.nilaiUtsPts}
-                                  disabled={!canEditGrades}
-                                  onChange={(e) => updateGradeDraft(student.id, { nilaiUtsPts: e.target.value })}
-                                  className="w-full rounded-xl border px-3 py-2.5 outline-none focus:border-emerald-500"
-                                  placeholder="0-100"
-                                />
-                              </div>
-                              <div>
-                                <label className="mb-2 block text-xs font-semibold text-gray-600">Nilai SAS</label>
-                                <input
-                                  type="number" min="0" max="100"
-                                  value={draft.nilaiSas}
-                                  disabled={!canEditGrades}
-                                  onChange={(e) => updateGradeDraft(student.id, { nilaiSas: e.target.value })}
-                                  className="w-full rounded-xl border px-3 py-2.5 outline-none focus:border-emerald-500"
-                                  placeholder="0-100"
-                                />
-                              </div>
-                              <div>
-                                <label className="mb-2 block text-xs font-semibold text-gray-600">Nilai Akhir (Otomatis)</label>
-                                <input
-                                  type="number" min="0" max="100"
-                                  value={draft.nilaiAkhir}
-                                  readOnly
-                                  className="w-full rounded-xl border px-3 py-2.5 bg-emerald-50 font-bold text-emerald-700 outline-none"
-                                  placeholder="Menunggu Non-Tes + SAS"
-                                />
-                                <p className="mt-1 text-[11px] text-gray-400">Rumus: Non-Tes {NILAI_NON_TES_WEIGHT}% + UTS/PTS {NILAI_UTS_WEIGHT}% + SAS {NILAI_SAS_WEIGHT}%.</p>
-                              </div>
-                            </div>
-
-                            {expanded && (
-                              <div className="mt-5 rounded-2xl bg-gray-50 p-4">
-                                <div className="mb-3 flex items-center justify-between gap-3">
-                                  <div>
-                                    <h5 className="font-bold text-gray-900">Sumatif Materi</h5>
-                                    <p className="text-xs text-gray-500">Bisa ditambah beberapa materi/TP.</p>
-                                  </div>
-                                  {canEditGrades && (
-                                    <button
-                                      onClick={() => addSumatifRow(student.id)}
-                                      className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700"
-                                    >
-                                      + Tambah Materi
-                                    </button>
-                                  )}
-                                </div>
-                                <div className="space-y-3">
-                                  {draft.sumatif.map((item, index) => (
-                                    <div key={`${student.id}-sumatif-${index}`} className="grid gap-2 md:grid-cols-[1.2fr_1.5fr_110px_40px]">
-                                      <input
-                                        value={item.materi}
-                                        disabled={!canEditGrades}
-                                        onChange={(e) => updateSumatifDraft(student.id, index, { materi: e.target.value })}
-                                        placeholder="Materi / Bab"
-                                        className="rounded-lg border px-3 py-2 text-sm outline-none focus:border-emerald-500"
-                                      />
-                                      <input
-                                        value={item.tujuanPembelajaran}
-                                        disabled={!canEditGrades}
-                                        onChange={(e) => updateSumatifDraft(student.id, index, { tujuanPembelajaran: e.target.value })}
-                                        placeholder="Tujuan Pembelajaran / TP"
-                                        className="rounded-lg border px-3 py-2 text-sm outline-none focus:border-emerald-500"
-                                      />
-                                      <input
-                                        type="number" min="0" max="100"
-                                        value={item.nilai}
-                                        disabled={!canEditGrades}
-                                        onChange={(e) => updateSumatifDraft(student.id, index, { nilai: e.target.value })}
-                                        placeholder="Nilai"
-                                        className="rounded-lg border px-3 py-2 text-sm outline-none focus:border-emerald-500"
-                                      />
-                                      {canEditGrades && (
-                                        <button
-                                          onClick={() => removeSumatifRow(student.id, index)}
-                                          className="rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
-                                          title="Hapus materi"
-                                        >
-                                          ×
-                                        </button>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            <div className="mt-5 grid gap-4 md:grid-cols-2">
-                              <div>
-                                <label className="mb-2 block text-xs font-semibold text-gray-600">Catatan TP Tertinggi</label>
-                                <textarea
-                                  value={draft.catatanTpTertinggi}
-                                  disabled={!canEditGrades}
-                                  onChange={(e) => updateGradeDraft(student.id, { catatanTpTertinggi: e.target.value })}
-                                  rows={2}
-                                  placeholder="Materi/TP yang paling dikuasai siswa"
-                                  className="w-full rounded-xl border px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
-                                />
-                              </div>
-                              <div>
-                                <label className="mb-2 block text-xs font-semibold text-gray-600">Catatan TP Terendah</label>
-                                <textarea
-                                  value={draft.catatanTpTerendah}
-                                  disabled={!canEditGrades}
-                                  onChange={(e) => updateGradeDraft(student.id, { catatanTpTerendah: e.target.value })}
-                                  rows={2}
-                                  placeholder="Materi/TP yang masih perlu bimbingan"
-                                  className="w-full rounded-xl border px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-
-                      {!canEditGrades ? (
-                        <div className={`rounded-2xl border p-4 text-sm ${role === "Orang Tua" ? "border-purple-200 bg-purple-50 text-purple-800" : "border-blue-200 bg-blue-50 text-blue-800"}`}>
-                          Nilai ini hanya dapat dilihat. Perubahan nilai dilakukan oleh Guru/Admin sesuai hak akses.
+                  {!gradeLoading && gradeStudents.length > 0 && normalizeReportSubjectName(gradeSubjects.find((item) => item.id === selectedGradeSubjectId)?.name ?? "").includes("tahfidz") ? (
+                    <div className="space-y-5">
+                      <section className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+                        <h3 className="font-bold text-gray-900">Riwayat Setoran Hafalan</h3>
+                        <p className="mt-1 text-sm text-gray-500">Pilih satu siswa untuk melihat dan mencatat riwayat hafalannya. Data siswa lain tidak dicampur dalam tabel ini.</p>
+                        <div className="mt-4 max-w-xl">
+                          <label className="mb-2 block text-sm font-semibold text-gray-700">Cari / Pilih Siswa</label>
+                          <input
+                            type="text"
+                            list="tahfidz-student-options"
+                            value={tahfidzStudentSearch || (gradeStudents.find((student) => student.id === selectedTahfidzStudentId)?.name ?? "")}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setTahfidzStudentSearch(value);
+                              const matched = gradeStudents.find((student) => `${student.name}${student.nis ? ` (${student.nis})` : ""}`.toLowerCase() === value.trim().toLowerCase() || student.name.toLowerCase() === value.trim().toLowerCase());
+                              if (matched) {
+                                setTahfidzStudentSearch(matched.name);
+                                void loadTahfidzSetoran(matched.id);
+                              } else if (selectedTahfidzStudentId) {
+                                setSelectedTahfidzStudentId("");
+                                setTahfidzSetoranRows([]);
+                              }
+                            }}
+                            placeholder="Ketik nama siswa atau NIS..."
+                            className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3"
+                          />
+                          <datalist id="tahfidz-student-options">
+                            {gradeStudents.map((student) => <option key={student.id} value={`${student.name}${student.nis ? ` (${student.nis})` : ""}`} />)}
+                          </datalist>
+                          {selectedTahfidzStudentId && <p className="mt-2 text-xs font-semibold text-emerald-700">Siswa terpilih: {gradeStudents.find((student) => student.id === selectedTahfidzStudentId)?.name}</p>}
                         </div>
-                      ) : (
-                        <div className="sticky bottom-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-white p-4 shadow-lg">
-                          <div>
-                            {gradeSaved && <p className="text-sm font-semibold text-emerald-700">✓ Nilai berhasil disimpan.</p>}
-                            <p className="text-xs text-gray-500">Data disimpan berdasarkan siswa, kelas, mapel, semester, dan tahun ajaran.</p>
+                        {selectedTahfidzStudentId && <>
+                          <div className="mt-5 rounded-xl border border-emerald-100 bg-emerald-50/50 p-4">
+                            <h4 className="font-semibold text-gray-900">Tambah Setoran Hafalan</h4>
+                            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                              <label className="text-xs font-semibold text-gray-600">Tanggal<input type="date" value={tahfidzSetoranForm.tanggal} disabled={!canEditGrades} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, tanggal: e.target.value }))} className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" /></label>
+                              <label className="text-xs font-semibold text-gray-600">Nama Surat<input value={tahfidzSetoranForm.namaSurat} disabled={!canEditGrades} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, namaSurat: e.target.value }))} placeholder="Contoh: An-Nas" className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" /></label>
+                              <label className="text-xs font-semibold text-gray-600">Status<select value={tahfidzSetoranForm.status} disabled={!canEditGrades} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, status: e.target.value as "Tuntas" | "Ulang" }))} className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm"><option value="Tuntas">Tuntas</option><option value="Ulang">Ulang</option></select></label>
+                              <label className="text-xs font-semibold text-gray-600">Nilai Angka<input type="number" min="0" max="100" value={tahfidzSetoranForm.nilai} disabled={!canEditGrades} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, nilai: e.target.value }))} className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" placeholder="0–100" /></label>
+                              <label className="text-xs font-semibold text-gray-600">Predikat<input value={tahfidzSetoranForm.predikat} disabled={!canEditGrades} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, predikat: e.target.value }))} placeholder="Contoh: A" className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" /></label>
+                              <label className="text-xs font-semibold text-gray-600 md:col-span-2 xl:col-span-1">Catatan Kelancaran Hafalan & Tajwid<textarea rows={2} value={tahfidzSetoranForm.catatan} disabled={!canEditGrades} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, catatan: e.target.value }))} placeholder="Tuliskan kelancaran hafalan dan tajwid..." className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" /></label>
+                            </div>
+                            {canEditGrades && <button type="button" onClick={saveTahfidzSetoran} disabled={tahfidzSetoranSaving} className="mt-3 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50">{tahfidzSetoranSaving ? "Menyimpan..." : "Simpan Setoran"}</button>}
                           </div>
-                          <button
-                            onClick={saveGrades}
-                            disabled={gradeSaving}
-                            className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
-                          >
-                            {gradeSaving ? "Menyimpan..." : "Simpan Semua Nilai"}
-                          </button>
-                        </div>
-                      )}
+                          {tahfidzSetoranError && <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{tahfidzSetoranError}</p>}
+                          <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
+                            <table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-emerald-700 text-white"><tr><th className="px-3 py-3">Tanggal</th><th className="px-3 py-3">Nama Surat</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Nilai</th><th className="px-3 py-3">Predikat</th><th className="px-3 py-3">Catatan</th>{canEditGrades && <th className="px-3 py-3">Aksi</th>}</tr></thead><tbody>{tahfidzSetoranRows.length ? tahfidzSetoranRows.map((row) => <tr key={row.id} className="border-t align-top"><td className="whitespace-nowrap px-3 py-3">{row.tanggal}</td><td className="px-3 py-3 font-semibold">{row.nama_surat}</td><td className="px-3 py-3">{row.status}</td><td className="px-3 py-3">{row.nilai ?? "-"}</td><td className="px-3 py-3">{row.predikat ?? "-"}</td><td className="max-w-sm whitespace-pre-wrap px-3 py-3">{row.catatan || "-"}</td>{canEditGrades && <td className="px-3 py-3"><button type="button" onClick={() => deleteTahfidzSetoran(row.id)} className="font-semibold text-red-600">Hapus</button></td>}</tr>) : <tr><td colSpan={canEditGrades ? 7 : 6} className="px-3 py-6 text-center text-gray-500">Belum ada riwayat setoran untuk siswa ini.</td></tr>}</tbody></table>
+                          </div>
+                        </>}
+                      </section>
+                      <section className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+                        <div className="mb-3"><h3 className="font-bold text-gray-900">Penilaian Tahfidz</h3><p className="mt-1 text-sm text-gray-500">Nilai Non-Tes, STS, dan SAS disimpan terpisah dari riwayat setoran hafalan.</p></div>
+                        {selectedTahfidzStudentId ? gradeStudents.filter((item) => item.id === selectedTahfidzStudentId).map((student) => { const draft = gradeDrafts[student.id] ?? emptyGradeDraft(student.id); return <div key={student.id} className="max-w-3xl"><p className="mb-3 text-sm font-semibold text-gray-700">{student.name} · NIS {student.nis || "-"}</p><div className="grid gap-3 md:grid-cols-3">{([["nilaiNonTes","Non-Tes"],["nilaiUtsPts","STS"],["nilaiSas","SAS"]] as const).map(([key,label]) => <label key={key} className="text-xs font-semibold text-gray-600">{label}<input type="number" min="0" max="100" value={draft[key]} disabled={!canEditGrades} onChange={(e) => updateGradeDraft(student.id,{ [key]: e.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2.5 text-sm" placeholder="0–100" /></label>)}</div><p className="mt-3 text-sm text-gray-600">Nilai Akhir: <strong className="text-emerald-700">{draft.nilaiAkhir || "-"}</strong> · Predikat: <strong>{getPredikatNilai(draft.nilaiAkhir === "" ? null : Number(draft.nilaiAkhir))}</strong></p></div>; }) : <p className="text-sm text-gray-500">Pilih siswa di bagian Riwayat Setoran Hafalan untuk mengisi penilaian.</p>}
+                      </section>
+                      <div className="flex justify-end">{canEditGrades && <button type="button" onClick={saveGrades} disabled={gradeSaving || !selectedTahfidzStudentId} className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white disabled:opacity-50">{gradeSaving ? "Menyimpan..." : "Simpan Penilaian Tahfidz"}</button>}</div>
+                      {gradeSaved && <p className="text-sm font-semibold text-emerald-700">✓ Penilaian Tahfidz berhasil disimpan.</p>}
                     </div>
-                  )}
+                  ) : !gradeLoading && gradeStudents.length > 0 ? (
+                    <div className="space-y-4">
+                      <details className="overflow-hidden rounded-2xl border border-emerald-200 bg-white">
+                        <summary className="cursor-pointer list-none px-5 py-4 font-bold text-gray-900 hover:bg-emerald-50">Penilaian (TP1–TP10, Non-Tes, STS, SAS)<span className="float-right text-sm font-normal text-gray-500">Klik untuk buka/tutup</span></summary>
+                        <div className="space-y-4 border-t border-emerald-100 p-4">
+                      <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+
+                        <h3 className="font-bold text-gray-900">Petunjuk Pengisian Nilai</h3>
+                        <p className="mt-1 text-sm text-gray-600">Isi nilai pada kolom TP1 sampai TP10 sesuai hasil pembelajaran. Gunakan kolom Non-Tes untuk penilaian praktik, proyek, atau kinerja. Lengkapi nilai STS dan SAS sesuai hasil penilaian.</p>
+                      </div>
+                      <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm">
+                        <table className="w-full min-w-[1500px] border-collapse text-xs">
+                          <thead className="bg-emerald-700 text-white"><tr>
+                            <th className="sticky left-0 z-20 bg-emerald-700 px-3 py-3 text-left">No</th>
+                            <th className="sticky left-10 z-20 min-w-[210px] bg-emerald-700 px-3 py-3 text-left">Nama Siswa</th>
+                            {Array.from({length:10},(_,i)=><th key={i} className="min-w-[76px] px-2 py-3">TP{i+1}</th>)}
+                            <th className="min-w-[90px] px-2 py-3">Non-Tes</th><th className="min-w-[80px] px-2 py-3">STS</th><th className="min-w-[80px] px-2 py-3">SAS</th>
+                            <th className="min-w-[85px] px-2 py-3">Jumlah</th><th className="min-w-[85px] px-2 py-3">Rata-rata</th><th className="min-w-[75px] px-2 py-3">Peringkat</th>
+                          </tr></thead>
+                          <tbody>{gradeStudents.map((student,index)=>{
+                            const draft=gradeDrafts[student.id]??emptyGradeDraft(student.id);
+                            const tpValues=Array.from({length:10},(_,i)=>draft.sumatif[i]?.nilai??"");
+                            const values=[...tpValues,draft.nilaiNonTes,draft.nilaiUtsPts,draft.nilaiSas].map(v=>v===""?null:Number(v)).filter((v):v is number=>v!==null&&Number.isFinite(v));
+                            const total=values.reduce((a,b)=>a+b,0); const average=values.length?total/values.length:null;
+                            const rank=gradeStudents.map(st=>{const d=gradeDrafts[st.id]??emptyGradeDraft(st.id);const vals=[...Array.from({length:10},(_,i)=>d.sumatif[i]?.nilai??""),d.nilaiNonTes,d.nilaiUtsPts,d.nilaiSas].map(v=>v===""?null:Number(v)).filter((v):v is number=>v!==null&&Number.isFinite(v));return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:-1;}).filter(v=>v>=0).filter(v=>average!==null&&v>average).length+1;
+                            return <tr key={student.id} className="border-t hover:bg-emerald-50/40">
+                              <td className="sticky left-0 z-10 bg-white px-3 py-2">{index+1}</td><td className="sticky left-10 z-10 bg-white px-3 py-2"><div className="font-semibold text-gray-800">{student.name}</div><div className="text-[10px] text-gray-400">NIS {student.nis}</div></td>
+                              {Array.from({length:10},(_,i)=>{const item=draft.sumatif[i]??{materi:`TP ${i+1}`,tujuanPembelajaran:`TP ${i+1}`,nilai:""};return <td key={i} className="px-1.5 py-2"><input aria-label={`TP ${i+1} ${student.name}`} type="number" min="0" max="100" value={item.nilai} disabled={!canEditGrades} onChange={e=>{const next=[...draft.sumatif];while(next.length<=i)next.push({materi:`TP ${next.length+1}`,tujuanPembelajaran:`TP ${next.length+1}`,nilai:""});next[i]={...next[i],materi:next[i].materi||`TP ${i+1}`,tujuanPembelajaran:next[i].tujuanPembelajaran||`TP ${i+1}`,nilai:e.target.value};updateGradeDraft(student.id,{sumatif:next});}} className="w-[68px] rounded-lg border px-2 py-2 text-center outline-none focus:border-emerald-500 disabled:bg-gray-50" placeholder="-" /></td>})}
+                              {[['nilaiNonTes','nilaiNonTes'],['nilaiUtsPts','nilaiUtsPts'],['nilaiSas','nilaiSas']].map(([key])=><td key={key} className="px-1.5 py-2"><input aria-label={`${key} ${student.name}`} type="number" min="0" max="100" value={draft[key as 'nilaiNonTes'|'nilaiUtsPts'|'nilaiSas']} disabled={!canEditGrades} onChange={e=>updateGradeDraft(student.id,{[key]:e.target.value})} className="w-[72px] rounded-lg border px-2 py-2 text-center outline-none focus:border-emerald-500 disabled:bg-gray-50" placeholder="-" /></td>)}
+                              <td className="px-2 py-2 text-center font-semibold">{values.length?total:"-"}</td><td className="px-2 py-2 text-center font-semibold text-emerald-700">{average===null?"-":average.toFixed(1)}</td><td className="px-2 py-2 text-center">{average===null?"-":rank}</td>
+                            </tr>;
+                          })}</tbody>
+                        </table>
+                      </div>
+                        </div>
+                      </details>
+                      <details className="overflow-hidden rounded-2xl border border-blue-200 bg-white">
+                        <summary className="cursor-pointer list-none px-5 py-4 font-bold text-gray-900 hover:bg-blue-50">Catatan Capaian Kompetensi per Siswa<span className="float-right text-sm font-normal text-gray-500">Klik untuk buka/tutup</span></summary>
+                        <section className="border-t border-blue-100 p-4">
+                        <div className="mb-4">
+                          <p className="text-sm text-gray-500">Diisi oleh guru pengampu untuk mata pelajaran yang sedang dipilih. Catatan ini akan otomatis tampil pada bagian B. Capaian Kompetensi di Rapor Formal.</p>
+                        </div>
+                        <div className="space-y-3">
+                          {gradeStudents.map((student) => {
+                            const draft = gradeDrafts[student.id] ?? emptyGradeDraft(student.id);
+                            return <label key={`capaian-${student.id}`} className="block rounded-xl border border-gray-100 p-3">
+                              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                <span className="block text-sm font-semibold text-gray-800">{student.name} <span className="font-normal text-gray-400">· NIS {student.nis || "-"}</span></span>
+                              </div>
+                              <textarea rows={3} value={draft.deskripsiCapaian} disabled={!canEditGrades} onChange={(e) => updateGradeDraft(student.id, { deskripsiCapaian: e.target.value })} placeholder={`Tuliskan catatan awal, misalnya: Anak sangat bagus dalam membaca.`} className="w-full rounded-xl border px-3 py-2.5 text-sm disabled:bg-gray-50" />
+                              <p className="mt-1 text-xs text-gray-400">Tuliskan capaian berdasarkan hasil pengamatan guru pada mata pelajaran ini.</p>
+                            </label>;
+                          })}
+                        </div>
+                        </section>
+                      </details>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <button type="button" onClick={()=>printSchoolLearningDocument("Rekap Nilai",["No","Nama Siswa",...Array.from({length:10},(_,i)=>`TP${i+1}`),"Non-Tes","STS","SAS","Jumlah","Rata-rata","Peringkat"],gradeStudents.map((student,index)=>{const d=gradeDrafts[student.id]??emptyGradeDraft(student.id);const tps=Array.from({length:10},(_,i)=>d.sumatif[i]?.nilai||"-");const vals=[...tps,d.nilaiNonTes||"-",d.nilaiUtsPts||"-",d.nilaiSas||"-"].map(v=>v==="-"?null:Number(v)).filter((v):v is number=>v!==null);const avg=vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;return [index+1,student.name,...tps,d.nilaiNonTes||"-",d.nilaiUtsPts||"-",d.nilaiSas||"-",vals.reduce((a,b)=>a+b,0),avg===null?"-":avg.toFixed(1),"-"];}),name || "Guru Mata Pelajaran",gradeSubjects.find((item)=>item.id===selectedGradeSubjectId)?.name || "-")} className="rounded-xl border border-emerald-300 bg-white px-4 py-2.5 text-sm font-bold text-emerald-700">🖨️ Cetak Tabel Nilai</button>
+                        {canEditGrades ? <button onClick={saveGrades} disabled={gradeSaving} className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white disabled:opacity-50">{gradeSaving?"Menyimpan...":"Simpan Semua Nilai"}</button> : <p className="text-sm text-gray-500">Data hanya dapat dilihat.</p>}
+                      </div>
+                      {gradeSaved&&<p className="text-sm font-semibold text-emerald-700">✓ Nilai berhasil disimpan.</p>}
+                    </div>
+                  ) : null}
                 </>
               ) : (
                 <>
@@ -7532,12 +7562,9 @@ if (!loggedIn) {
                       <div className="rounded-2xl border p-5">
                         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                           <div>
-                            <h4 className="font-bold">{reportType === "school" ? "B. Deskripsi Capaian Mata Pelajaran" : "B. Keterangan / Deskripsi Madin"}</h4>
-                            <p className="mt-1 text-sm text-gray-500">{reportType === "school" ? "Deskripsi dibuat dari Sumatif Materi dan Tujuan Pembelajaran." : "Untuk Madin, bagian keterangan terutama digunakan untuk BTQ."}</p>
+                            <h4 className="font-bold">{reportType === "school" ? "B. Capaian Kompetensi" : "B. Keterangan / Deskripsi Madin"}</h4>
+                            <p className="mt-1 text-sm text-gray-500">{reportType === "school" ? "Capaian kompetensi diambil dari catatan guru pengampu pada menu Nilai." : "Untuk Madin, bagian keterangan terutama digunakan untuk BTQ."}</p>
                           </div>
-                          <button type="button" onClick={generateReportDescriptions} disabled={isParentReadOnly || reportDescriptionLoading || reportActiveGrades.length === 0} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50">
-                            {reportDescriptionLoading ? "Membuat..." : "✨ Generate Deskripsi"}
-                          </button>
                         </div>
                         <div className="space-y-4">
                           {reportActiveGrades.length > 0 ? reportActiveGrades.map((item) => (
@@ -7546,7 +7573,7 @@ if (!loggedIn) {
                                 <div className="font-bold text-gray-900">{item.subjectName}</div>
                                 <div className="text-xs font-semibold text-gray-500">Nilai {item.nilaiAkhir ?? "-"} • Predikat {item.predikat}</div>
                               </div>
-                              <textarea rows={3} value={item.deskripsiCapaian} disabled={isParentReadOnly} onChange={(e) => updateReportGradeDescription(item.gradeId, e.target.value)} className="w-full rounded-xl border bg-white px-4 py-3 text-sm" placeholder="Deskripsi capaian pembelajaran" />
+                              <div className="rounded-xl border bg-gray-50 px-4 py-3 text-sm text-gray-700 whitespace-pre-wrap">{item.deskripsiCapaian || "Belum diisi. Guru pengampu mengisi melalui menu Nilai."}</div>
                             </div>
                           )) : <p className="text-sm text-gray-500">Belum ada nilai untuk dibuatkan deskripsi.</p>}
                         </div>
@@ -7554,29 +7581,33 @@ if (!loggedIn) {
 
                       {reportType === "school" && (
                         <div className="rounded-2xl border p-5">
-                          <div className="mb-4 flex items-center justify-between gap-3">
-                            <div>
-                              <h4 className="font-bold">C. Ekstrakurikuler</h4>
-                              <p className="mt-1 text-sm text-gray-500">Pencak Silat adalah ekstrakurikuler tetap sekolah. Predikat A–D dan keterangan mengikuti data nilai/catatan yang tersedia.</p>
-                            </div>
+                          <div className="mb-3">
+                            <h4 className="font-bold">C. Kokurikuler</h4>
+                            <p className="mt-1 text-sm text-gray-500">Tuliskan ringkasan kegiatan kokurikuler dan perkembangan peserta didik berdasarkan pengamatan guru/pendamping.</p>
+                          </div>
+                          <textarea rows={4} value={reportDraft.kokurikuler} disabled={isParentReadOnly} onChange={(e) => updateReportDraft({ kokurikuler: e.target.value })} placeholder="Isi deskripsi kegiatan dan perkembangan kokurikuler siswa" className="w-full rounded-xl border px-4 py-3" />
+                        </div>
+                      )}
+
+                      {reportType === "school" && (
+                        <div className="rounded-2xl border p-5">
+                          <div className="mb-4">
+                            <h4 className="font-bold">D. Ekstrakurikuler</h4>
+                            <p className="mt-1 text-sm text-gray-500">Isi catatan keterangan untuk kegiatan Pramuka dan Silat. Tidak menggunakan nilai angka maupun predikat.</p>
                           </div>
                           {reportExtracurricular.map((item, index) => (
-                            <div key={index} className="grid gap-3 rounded-xl bg-gray-50 p-3 md:grid-cols-[1.1fr_.6fr_1.8fr]">
-                              <div className="rounded-xl border bg-white px-3 py-2.5 font-semibold text-gray-800">Pencak Silat</div>
-                              <select value={item.predikat} disabled={isParentReadOnly} onChange={(e) => updateReportExtracurricular(index, { predikat: e.target.value })} className="rounded-xl border bg-white px-3 py-2.5">
-                                <option value="">Predikat</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option>
-                              </select>
-                              <input value={item.keterangan} disabled={isParentReadOnly} onChange={(e) => updateReportExtracurricular(index, { keterangan: e.target.value })} placeholder="Keterangan Pencak Silat" className="rounded-xl border bg-white px-3 py-2.5" />
+                            <div key={item.nama} className="mb-3 grid gap-3 rounded-xl bg-gray-50 p-3 md:grid-cols-[1fr_2fr]">
+                              <div className="rounded-xl border bg-white px-3 py-2.5 font-semibold text-gray-800">{item.nama}</div>
+                              <textarea rows={2} value={item.keterangan} disabled={isParentReadOnly} onChange={(e) => updateReportExtracurricular(index, { keterangan: e.target.value })} placeholder={`Catatan keterangan ${item.nama}`} className="w-full rounded-xl border bg-white px-3 py-2.5" />
                             </div>
                           ))}
-                          {!reportPencakSilatGrade && <p className="mt-3 text-xs text-amber-700">Belum ada nilai Pencak Silat pada modul nilai. Anda tetap dapat mengisi predikat dan keterangan ekstrakurikuler.</p>}
                         </div>
                       )}
 
                       <div className="rounded-2xl border p-5">
                         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                           <div>
-                            <h4 className="font-bold">{reportType === "school" ? "D. Ketidakhadiran" : "C. Ketidakhadiran"}</h4>
+                            <h4 className="font-bold">{reportType === "school" ? "E. Ketidakhadiran" : "C. Ketidakhadiran"}</h4>
                             <p className="mt-1 text-sm text-gray-500">Data dapat diambil otomatis dari modul Absensi.</p>
                           </div>
                           <button type="button" onClick={loadReportAttendance} disabled={isParentReadOnly || reportAttendanceLoading} className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-gray-50 disabled:opacity-50">{reportAttendanceLoading ? "Mengambil..." : "↻ Ambil dari Absensi"}</button>
@@ -7591,7 +7622,7 @@ if (!loggedIn) {
                       <div className="rounded-2xl border p-5">
                         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                           <div>
-                            <h4 className="font-bold">{reportType === "school" ? "E. Catatan Wali Kelas & Kelulusan" : "D. Catatan Wali Kelas"}</h4>
+                            <h4 className="font-bold">{reportType === "school" ? "F. Catatan Wali Kelas" : "D. Catatan Wali Kelas"}</h4>
                             <p className="mt-1 text-sm text-gray-500">Draft dibuat dari rekap nilai, ketidakhadiran, dan ekstrakurikuler yang tercatat. Wali kelas tetap dapat mengedit sebelum menyimpan.</p>
                           </div>
                           <button type="button" onClick={generateWaliKelasDraft} disabled={isParentReadOnly || reportActiveGrades.length === 0} className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">
@@ -7610,7 +7641,7 @@ if (!loggedIn) {
                       </div>
 
                       <div className="rounded-2xl border p-5">
-                        <h4 className="mb-4 font-bold">{reportType === "school" ? "F. Tanda Tangan & Penerbitan" : "E. Tanda Tangan & Penerbitan"}</h4>
+                        <h4 className="mb-4 font-bold">{reportType === "school" ? "G. Tanda Tangan & Penerbitan" : "E. Tanda Tangan & Penerbitan"}</h4>
                         <div className="grid gap-4 md:grid-cols-2">
                           <input type="date" value={reportDraft.tanggalRaport} disabled={isParentReadOnly} onChange={(e) => updateReportDraft({ tanggalRaport: e.target.value })} className="rounded-xl border px-4 py-3" />
                           <select value={reportDraft.status} disabled={isParentReadOnly} onChange={(e) => updateReportDraft({ status: e.target.value as "draft" | "final" })} className="rounded-xl border px-4 py-3"><option value="draft">Draft</option><option value="final">Final</option></select>
@@ -7638,165 +7669,140 @@ if (!loggedIn) {
 
                       <div className="printable-report">
                         <div className="report-page">
-                          <div className="report-header">
-                            <div className="report-logo">
-                              {schoolSettings.logoUrl ? (
-                                <img src={schoolSettings.logoUrl} alt="Logo sekolah" />
-                              ) : (
-                                <span>AB</span>
-                              )}
-                            </div>
-                            <div className="report-header-text">
-                              <div className="report-school-name">{schoolSettings.namaSekolah || "SD Islam Al-Barkah"}</div>
-                              <div className="report-school-address">
-                                {[schoolSettings.alamat, schoolSettings.desaKelurahan && `Desa/Kel. ${schoolSettings.desaKelurahan}`, schoolSettings.kecamatan && `Kec. ${schoolSettings.kecamatan}`, schoolSettings.kabupatenKota, schoolSettings.provinsi, schoolSettings.kodePos].filter(Boolean).join(" · ")}
-                              </div>
-                              <div className="report-school-contact">
-                                {[schoolSettings.telepon && `Telp. ${schoolSettings.telepon}`, schoolSettings.email && `Email: ${schoolSettings.email}`, schoolSettings.website].filter(Boolean).join(" · ")}
-                              </div>
-                              <div className="report-document-title">{reportTitle}</div>
-                              <div className="report-subtitle">Kurikulum Satuan Pendidikan · Tahun Ajaran {schoolSettings.tahunAjaran || "-"}</div>
-                            </div>
-                          </div>
-
-                          <div className="report-title-line" />
-
-                          <table className="report-identity">
-                            <tbody>
-                              <tr>
-                                <td>Nama Peserta Didik</td>
-                                <td>: {reportStudents.find((item) => item.id === reportDraft.studentId)?.name ?? "-"}</td>
-                                <td>Kelas</td>
-                                <td>: {selectedReportClass || "-"}</td>
-                              </tr>
-                              <tr>
-                                <td>NIS</td>
-                                <td>: {reportStudents.find((item) => item.id === reportDraft.studentId)?.nis ?? "-"}</td>
-                                <td>Semester</td>
-                                <td>: {selectedSemester}</td>
-                              </tr>
-                              <tr>
-                                <td>Tahun Ajaran</td>
-                                <td>: {gradeClasses.find((item) => item.id === selectedGradeClassId)?.tahunAjaran ?? "-"}</td>
-                                <td>Status</td>
-                                <td>: {reportDraft.status === "final" ? "Final" : "Draft"}</td>
-                              </tr>
-                            </tbody>
-                          </table>
+                          {reportType === "school" ? (
+                            <>
+                              <table className="report-identity report-identity-ak hyar">
+                                <tbody>
+                                  <tr><td>Nama Murid</td><td>: {reportStudents.find((item) => item.id === reportDraft.studentId)?.name ?? "-"}</td><td>Kelas</td><td>: {selectedReportClass || "-"}</td></tr>
+                                  <tr><td>NIS/NISN</td><td>: {reportStudents.find((item) => item.id === reportDraft.studentId)?.nis ?? "-"}</td><td>Fase</td><td>: {(() => { const n = Number(String(selectedReportClass || "").match(/\d+/)?.[0] || 0); return n >= 1 && n <= 2 ? "A" : n >= 3 && n <= 4 ? "B" : n >= 5 && n <= 6 ? "C" : "-"; })()}</td></tr>
+                                  <tr><td>Sekolah</td><td>: {schoolSettings.namaSekolah || "SD Islam Al-Barkah"}</td><td>Semester</td><td>: {selectedSemester}</td></tr>
+                                  <tr><td>Alamat</td><td>: {schoolSettings.alamat || "-"}</td><td>Tahun Ajaran</td><td>: {gradeClasses.find((item) => item.id === selectedGradeClassId)?.tahunAjaran ?? "-"}</td></tr>
+                                </tbody>
+                              </table>
+                              <div className="report-title-line" />
+                              <div className="report-document-title report-document-title-ak hyar">LAPORAN HASIL BELAJAR</div>
+                            </>
+                          ) : (
+                            <table className="report-madin-identity">
+                              <tbody>
+                                <tr><td>Nama Madrasah</td><td>:</td><td>{schoolSettings.namaSekolah || "SD Islam Al-Barkah"}</td><td>Semester</td><td>:</td><td>{selectedSemester === "1" ? "Ganjil" : "Genap"}</td></tr>
+                                <tr><td>Alamat</td><td>:</td><td>{schoolSettings.alamat || "-"}</td><td>Tahun Pelajaran</td><td>:</td><td>{gradeClasses.find((item) => item.id === selectedGradeClassId)?.tahunAjaran ?? "-"}</td></tr>
+                                <tr><td>Nama Peserta Didik</td><td>:</td><td>{reportStudents.find((item) => item.id === reportDraft.studentId)?.name ?? "-"}</td><td>Nomor Induk</td><td>:</td><td>{reportStudents.find((item) => item.id === reportDraft.studentId)?.nis ?? "-"}</td></tr>
+                                <tr><td>Kelas</td><td>:</td><td>{selectedReportClass || "-"}</td><td>NISN</td><td>:</td><td>-</td></tr>
+                              </tbody>
+                            </table>
+                          )}
 
                           <h3 className="report-section-title">A. {reportType === "school" ? "NILAI MATA PELAJARAN" : "NILAI MATA PELAJARAN MADIN"}</h3>
-                          <table className="report-table">
-                            <thead>
-                              <tr>
-                                <th style={{ width: "7%" }}>No</th>
-                                <th>Mata Pelajaran</th>
-                                <th style={{ width: "16%" }}>Non-Tes</th>
-                                <th style={{ width: "16%" }}>UTS/PTS</th>
-                                <th style={{ width: "16%" }}>SAS</th>
-                                <th style={{ width: "14%" }}>Nilai Akhir</th>
-                                <th style={{ width: "12%" }}>Predikat</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {reportActiveGrades.length > 0 ? reportActiveGrades.map((item, index) => (
-                                <tr key={`print-${item.subjectId}`}>
-                                  <td className="text-center">{index + 1}</td>
-                                  <td>{item.subjectName}</td>
-                                  <td className="text-center">{item.nilaiNonTes ?? "-"}</td>
-                                  <td className="text-center">{item.nilaiUtsPts ?? "-"}</td>
-                                  <td className="text-center">{item.nilaiSas ?? "-"}</td>
-                                  <td className="text-center font-bold">{item.nilaiAkhir ?? "-"}</td>
-                                  <td className="text-center font-bold">{item.predikat}</td>
-                                </tr>
-                              )) : (
-                                <tr><td colSpan={7} className="text-center">Belum ada nilai.</td></tr>
-                              )}
-                            </tbody>
-                          </table>
-
-                          <h3 className="report-section-title">B. {reportType === "school" ? "DESKRIPSI CAPAIAN PEMBELAJARAN" : "KETERANGAN / DESKRIPSI MADIN"}</h3>
-                          <table className="report-table">
-                            <thead>
-                              <tr>
-                                <th style={{ width: "7%" }}>No</th>
-                                <th style={{ width: "25%" }}>Mata Pelajaran</th>
-                                <th>Deskripsi Capaian</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {reportActiveGrades.length > 0 ? reportActiveGrades.map((item, index) => (
-                                <tr key={`print-desc-${item.gradeId}`}>
-                                  <td className="text-center">{index + 1}</td>
-                                  <td className="font-bold">{item.subjectName}</td>
-                                  <td>{item.deskripsiCapaian || "-"}</td>
-                                </tr>
-                              )) : (
-                                <tr><td colSpan={3} className="text-center">Belum ada deskripsi capaian.</td></tr>
-                              )}
-                            </tbody>
-                          </table>
-
-                          {reportType === "school" && (
-                            <>
-                            <h3 className="report-section-title">C. EKSTRAKURIKULER</h3>
+                          {reportType === "school" ? (
                             <table className="report-table">
-                            <thead>
-                              <tr>
-                                <th style={{ width: "7%" }}>No</th>
-                                <th>Kegiatan</th>
-                                <th style={{ width: "20%" }}>Predikat</th>
-                                <th>Keterangan</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {reportExtracurricular.filter((item) => item.nama.trim()).length > 0 ? reportExtracurricular.filter((item) => item.nama.trim()).map((item, index) => (
-                                <tr key={`print-extra-${item.id ?? index}`}>
-                                  <td className="text-center">{index + 1}</td>
-                                  <td>{item.nama}</td>
-                                  <td className="text-center">{item.predikat || "-"}</td>
-                                  <td>{item.keterangan || "-"}</td>
-                                </tr>
-                              )) : (
-                                <tr><td colSpan={4} className="text-center">Tidak ada data ekstrakurikuler.</td></tr>
-                              )}
-                            </tbody>
+                              <thead><tr><th style={{ width: "7%" }}>No</th><th style={{ width: "29%" }}>Mata Pelajaran</th><th style={{ width: "17%" }}>Nilai Akhir</th><th>Capaian Kompetensi</th></tr></thead>
+                              <tbody>{reportActiveGrades.length > 0 ? reportActiveGrades.map((item, index) => (
+                                <tr key={`print-${item.subjectId}`}><td className="text-center">{index + 1}</td><td>{item.subjectName === "PP" ? "Pendidikan Pancasila dan Kewarganegaraan" : item.subjectName}</td><td className="text-center font-bold">{item.nilaiAkhir ?? "-"}</td><td>{item.deskripsiCapaian || "-"}</td></tr>
+                              )) : <tr><td colSpan={4} className="text-center">Belum ada nilai.</td></tr>}</tbody>
                             </table>
+                          ) : (
+                            <table className="report-table report-madin-table">
+                              <thead>
+                                <tr><th rowSpan={2}>No</th><th rowSpan={2}>Mata Pelajaran</th><th colSpan={2}>Pengetahuan</th><th colSpan={2}>Keterampilan</th><th rowSpan={2}>Sikap</th><th rowSpan={2}>Ket</th></tr>
+                                <tr><th>KKM</th><th>Nilai</th><th>KKM</th><th>Nilai</th></tr>
+                              </thead>
+                              <tbody>
+                                {reportActiveGrades.map((item, index) => (
+                                  <tr key={`print-${item.subjectId}`}><td className="text-center">{index + 1}</td><td className="font-bold">{item.subjectName}</td><td className="text-center">-</td><td className="text-center">{item.nilaiUtsPts ?? item.nilaiAkhir ?? "-"}</td><td className="text-center">-</td><td className="text-center">{item.nilaiNonTes ?? "-"}</td><td className="text-center">{item.predikat || "-"}</td><td className="text-center">{item.deskripsiCapaian ? "Tuntas" : "-"}</td></tr>
+                                ))}
+                                {Array.from({ length: Math.max(0, 10 - reportActiveGrades.length) }).map((_, index) => <tr key={`madin-empty-${index}`}><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>)}
+                                <tr className="report-madin-summary"><td colSpan={2}>Nilai Rata-Rata</td><td colSpan={2} className="text-center font-bold">{reportActiveGrades.length ? Math.round(reportActiveGrades.reduce((sum, item) => sum + Number(item.nilaiAkhir ?? item.nilaiUtsPts ?? 0), 0) / reportActiveGrades.filter((item) => item.nilaiAkhir != null || item.nilaiUtsPts != null).length) || "-" : "-"}</td><td colSpan={3}></td><td></td></tr>
+                                <tr className="report-madin-summary"><td colSpan={2}>Ranking</td><td colSpan={2} className="text-center font-bold">-</td><td colSpan={3}></td><td></td></tr>
+                              </tbody>
+                            </table>
+                          )}
+                          {reportType === "madin" && (
+                            <>
+                              <h3 className="report-section-title">C. KETIDAKHADIRAN</h3>
+                              <table className="report-attendance">
+                                <tbody>
+                                  <tr><td>Sakit</td><td>{reportDraft.sakit || "0"} hari</td></tr>
+                                  <tr><td>Izin</td><td>{reportDraft.izin || "0"} hari</td></tr>
+                                  <tr><td>Tanpa Keterangan</td><td>{reportDraft.tanpaKeterangan || "0"} hari</td></tr>
+                                </tbody>
+                              </table>
+                              <div className="report-madin-signatures">
+                                <div className="report-madin-sign-left">
+                                  <div>Mengetahui :</div>
+                                  <div>Orang Tua / Wali,</div>
+                                  <div className="report-madin-sign-space" />
+                                  <div>{reportDraft.namaOrangTua || ""}</div>
+                                </div>
+                                <div className="report-madin-sign-right">
+                                  <div>{reportDraft.tanggalRaport ? `SD Islam Al-Barkah, ${formatReportDate(reportDraft.tanggalRaport)}` : "SD Islam Al-Barkah"}</div>
+                                  <div>Wali Kelas</div>
+                                  <div className="report-madin-sign-space" />
+                                  <strong><u>{reportDraft.namaWaliKelas || ""}</u></strong>
+                                </div>
+                                <div className="report-madin-head">
+                                  <div>Mengetahui,</div><div>Kepala SD Islam Al-Barkah</div>
+                                  <div className="report-madin-sign-space" />
+                                  <strong><u>{reportDraft.namaKepalaSekolah || ""}</u></strong>
+                                </div>
+                              </div>
                             </>
                           )}
-
-                          <h3 className="report-section-title">{reportType === "school" ? "D. KETIDAKHADIRAN" : "C. KETIDAKHADIRAN"}</h3>
-                          <table className="report-attendance">
-                            <tbody>
-                              <tr><td>Sakit</td><td>{reportDraft.sakit || "0"} hari</td></tr>
-                              <tr><td>Izin</td><td>{reportDraft.izin || "0"} hari</td></tr>
-                              <tr><td>Tanpa Keterangan</td><td>{reportDraft.tanpaKeterangan || "0"} hari</td></tr>
-                            </tbody>
-                          </table>
                         </div>
 
-                        <div className="report-page report-page-second">
-                          <h3 className="report-section-title">{reportType === "school" ? "E. CATATAN DAN KETERANGAN" : "D. CATATAN DAN KETERANGAN"}</h3>
-                          <div className="report-box">
-                            <div className="report-box-label">Catatan Wali Kelas</div>
-                            <div className="report-box-content">{reportDraft.catatanWaliKelas || "-"}</div>
+                        {reportType === "school" && <div className="report-page report-page-second">
+                          <table className="report-identity report-identity-ak hyar">
+                            <tbody>
+                              <tr><td>Nama Murid</td><td>: {reportStudents.find((item) => item.id === reportDraft.studentId)?.name ?? "-"}</td><td>Kelas</td><td>: {selectedReportClass || "-"}</td></tr>
+                              <tr><td>NIS/NISN</td><td>: {reportStudents.find((item) => item.id === reportDraft.studentId)?.nis ?? "-"}</td><td>Fase</td><td>: {(() => { const n = Number(String(selectedReportClass || "").match(/\d+/)?.[0] || 0); return n >= 1 && n <= 2 ? "A" : n >= 3 && n <= 4 ? "B" : n >= 5 && n <= 6 ? "C" : "-"; })()}</td></tr>
+                              <tr><td>Sekolah</td><td>: {schoolSettings.namaSekolah || "SD Islam Al-Barkah"}</td><td>Semester</td><td>: {selectedSemester}</td></tr>
+                              <tr><td>Alamat</td><td>: {schoolSettings.alamat || "-"}</td><td>Tahun Ajaran</td><td>: {gradeClasses.find((item) => item.id === selectedGradeClassId)?.tahunAjaran ?? "-"}</td></tr>
+                            </tbody>
+                          </table>
+
+                          <h3 className="report-section-title">C. KOKURIKULER</h3>
+                          <div className="report-kokurikuler">{reportDraft.kokurikuler || "-"}</div>
+
+                          <h3 className="report-section-title">D. EKSTRAKURIKULER</h3>
+                          <table className="report-table report-extra-table">
+                            <thead><tr><th style={{ width: "7%" }}>No</th><th>Ekstrakurikuler</th><th>Keterangan</th></tr></thead>
+                            <tbody>
+                              {reportExtracurricular.filter((item) => item.nama.trim()).length > 0
+                                ? reportExtracurricular.filter((item) => item.nama.trim()).map((item, index) => (
+                                  <tr key={`print-extra-${item.id ?? index}`}><td className="text-center">{index + 1}</td><td>{item.nama}</td><td>{item.keterangan || "-"}</td></tr>
+                                ))
+                                : <tr><td colSpan={3} className="text-center">Tidak ada data ekstrakurikuler.</td></tr>}
+                            </tbody>
+                          </table>
+
+                          <div className="report-summary-grid">
+                            <div>
+                              <h3 className="report-section-title">E. KETIDAKHADIRAN</h3>
+                              <table className="report-attendance report-attendance-full"><tbody>
+                                <tr><td>Sakit</td><td>{reportDraft.sakit || "0"} hari</td></tr>
+                                <tr><td>Izin</td><td>{reportDraft.izin || "0"} hari</td></tr>
+                                <tr><td>Tanpa Keterangan</td><td>{reportDraft.tanpaKeterangan || "0"} hari</td></tr>
+                              </tbody></table>
+                            </div>
+                            <div className="report-box report-teacher-note">
+                              <div className="report-box-label">F. Catatan Wali Kelas</div>
+                              <div className="report-box-content">{reportDraft.catatanWaliKelas || "-"}</div>
+                            </div>
                           </div>
-                          {reportType === "school" && (
-                            <>
-                              <div className="report-box report-box-small">
-                                <div className="report-box-label">Keterangan Naik Kelas / Tinggal di Kelas</div>
-                                <div className="report-box-content">{reportDraft.keteranganNaikKelas || "-"}</div>
-                              </div>
-                              <div className="report-box report-box-small">
-                                <div className="report-box-label">Keterangan Kelulusan</div>
-                                <div className="report-box-content">{reportDraft.keteranganLulus || "-"}</div>
-                              </div>
-                            </>
-                          )}
+
+                          <div className="report-status-row">
+                            <strong>{Number(String(selectedReportClass || "").match(/\d+/)?.[0] || 0) === 6 ? "Keterangan Kelulusan" : "Keterangan Kenaikan Kelas"}</strong>
+                            <span>{Number(String(selectedReportClass || "").match(/\d+/)?.[0] || 0) === 6 ? (reportDraft.keteranganLulus || "-") : (reportDraft.keteranganNaikKelas || "-")}</span>
+                          </div>
+
+                          <div className="report-parent-response">
+                            <div className="report-box-label">Tanggapan Orang Tua/Wali Murid</div>
+                            <div className="report-parent-response-space" />
+                          </div>
 
                           <div className="report-signature-grid">
                             <div className="report-signature">
-                              <div>Mengetahui,</div>
-                              <div>Orang Tua/Wali</div>
+                              <div>Orang Tua Murid</div>
                               <div className="report-signature-space" />
                               <div className="report-signature-name">{reportDraft.namaOrangTua || "........................................"}</div>
                             </div>
@@ -7808,19 +7814,16 @@ if (!loggedIn) {
                               <div>{reportDraft.nipWaliKelas ? `NIP. ${reportDraft.nipWaliKelas}` : ""}</div>
                             </div>
                           </div>
-
                           <div className="report-head-signature">
-                            <div>Mengetahui,</div>
-                            <div>Kepala Sekolah</div>
+                            <div>Mengetahui,</div><div>Kepala Sekolah</div>
                             <div className="report-signature-space" />
                             <div className="report-signature-name">{reportDraft.namaKepalaSekolah || "........................................"}</div>
                             <div>{reportDraft.nipKepalaSekolah ? `NIP. ${reportDraft.nipKepalaSekolah}` : ""}</div>
                           </div>
-
                           <div className="report-footer">
-                            Dokumen ini diterbitkan melalui Portal Akademik SD Islam Al-Barkah.
+                            {selectedReportClass} · {reportStudents.find((item) => item.id === reportDraft.studentId)?.name ?? "-"} · NISN {reportStudents.find((item) => item.id === reportDraft.studentId)?.nis ?? "-"}
                           </div>
-                        </div>
+                        </div>}
                       </div>
                     </div>
                   )}
@@ -8883,7 +8886,7 @@ if (!loggedIn) {
 
                     <div className="mt-5 divide-y divide-gray-100">
                       {[
-                        ["Bagaimana melihat nilai siswa?", "Buka menu Nilai & Raport. Data nilai akan tampil sesuai semester dan data yang dimasukkan guru."],
+                        ["Bagaimana melihat nilai siswa?", "Buka menu Nilai untuk melihat data nilai sesuai semester."],
                         ["Bagaimana melihat kehadiran?", "Buka menu Absensi. Data kehadiran mengikuti absensi yang dicatat oleh guru."],
                         ["Mengapa ada mata pelajaran yang perlu ditingkatkan?", "Dashboard siswa otomatis menampilkan mata pelajaran dengan nilai di bawah target yang ditetapkan pada sistem."],
                         ["Bagaimana melihat tagihan sekolah?", "Buka menu SPP & Administrasi untuk melihat informasi tagihan dan riwayat administrasi yang tersedia."],
@@ -8913,7 +8916,8 @@ if (!loggedIn) {
                       </div>
                       <div className="mt-5 space-y-3 text-sm">
                         {[
-                          ["Nilai & Raport", "Nilai, perkembangan belajar, dan raport."],
+                          ["Nilai", "Input dan rekap nilai TP, Non-Tes, STS, dan SAS."],
+                          ["Rapor", "Pratinjau, pengelolaan, dan cetak rapor siswa."],
                           ["Absensi", "Riwayat kehadiran siswa."],
                           ["Journal", "Catatan kegiatan pembelajaran guru."],
                           ["Remedial & Pengayaan", "Tindak lanjut pembelajaran siswa."],

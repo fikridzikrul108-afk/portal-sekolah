@@ -34,7 +34,12 @@ export const menuItems: { name: string; icon: string; roles: Role[] }[] = [
     roles: ["Admin", "Kepala Sekolah", "Guru"],
   },
   {
-    name: "Nilai & Raport",
+    name: "Nilai",
+    icon: "report",
+    roles: ["Admin", "Kepala Sekolah", "Guru", "Siswa", "Orang Tua"],
+  },
+  {
+    name: "Rapor",
     icon: "report",
     roles: ["Admin", "Kepala Sekolah", "Guru", "Siswa", "Orang Tua"],
   },
@@ -78,7 +83,7 @@ export const menuItems: { name: string; icon: string; roles: Role[] }[] = [
 // Grup menu sidebar. Item yang tampil ditentukan oleh role user yang sedang login.
 const SIDEBAR_GROUPS = [
   { label: "HOME", items: ["Profil Saya", "Dashboard"] },
-  { label: "AKADEMIK", items: ["Data Siswa", "Data Guru", "Jadwal", "Kalender Akademik", "Nilai & Raport"] },
+  { label: "AKADEMIK", items: ["Data Siswa", "Data Guru", "Jadwal", "Kalender Akademik", "Nilai", "Rapor"] },
   { label: "PEMBELAJARAN", items: ["Journal", "Remedial & Pengayaan", "Program BK", "Absensi"] },
   { label: "ADMINISTRASI", items: ["SPP & Administrasi"] },
   { label: "SISTEM", items: ["Pusat Bantuan", "Pengaturan Sekolah"] },

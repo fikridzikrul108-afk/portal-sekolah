@@ -258,12 +258,12 @@ export default function DashboardShell({
                   <MenuIcon name="bell" size={18} />
                   {unreadNotificationCount > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white ring-2 ring-white dark:ring-slate-900">{Math.min(unreadNotificationCount, 99)}</span>}
                 </button>
-                {notificationPanelOpen && <div className="absolute right-0 top-full z-50 mt-3 w-[min(90vw,380px)] overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-800 shadow-2xl shadow-slate-900/10 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
+                {notificationPanelOpen && <div style={{ width: "min(560px, calc(100vw - 2rem))", minWidth: "min(560px, calc(100vw - 2rem))" }} className="absolute right-0 top-full z-[80] mt-3 box-border flex-none overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-800 shadow-2xl shadow-slate-900/10 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
                   <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/40">
                     <div><h3 className="font-bold">Riwayat Notifikasi</h3><p className="text-[11px] text-slate-500 dark:text-slate-400">Pengingat agenda dan kehadiran</p></div>
                     <button type="button" onClick={() => setNotificationPanelOpen(false)} className="rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-500 transition-colors hover:bg-slate-200/70 dark:hover:bg-slate-800">Tutup</button>
                   </div>
-                  <div className="max-h-[min(65vh,440px)] space-y-0 overflow-y-auto">
+                  <div className="max-h-[min(65vh,520px)] space-y-0 overflow-y-auto">
                     {notifications.length ? notifications.map((item) => <article key={item.id} className="border-b border-slate-100 px-4 py-3.5 transition-colors last:border-b-0 hover:bg-slate-50/70 dark:border-slate-800 dark:hover:bg-slate-800/40">
                       <div className="flex items-start gap-2.5">
                         <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${!item.read_at && !item.resolved_at ? "bg-blue-600" : "bg-slate-300 dark:bg-slate-600"}`} />
