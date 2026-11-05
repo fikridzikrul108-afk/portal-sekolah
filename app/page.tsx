@@ -868,9 +868,13 @@ function calendarDateKey(year: number, month: number, day: number) {
 function AcademicCalendarView({
   events,
   onRefresh,
+  role,
+  onUpdateEvent,
 }: {
   events: AcademicCalendarEvent[];
   onRefresh: () => Promise<void>;
+  role: Role;
+  onUpdateEvent: (id: string, payload: { judul: string; deskripsi: string; kategori: string; tanggal_mulai: string; tanggal_selesai: string | null; penting: boolean }) => Promise<void>;
 }) {
   const todayKey = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit",
@@ -878,6 +882,10 @@ function AcademicCalendarView({
   const [viewDate, setViewDate] = useState(() => new Date(`${todayKey.slice(0, 7)}-01T12:00:00+07:00`));
   const [selectedDate, setSelectedDate] = useState(todayKey);
   const [refreshing, setRefreshing] = useState(false);
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState({ judul: "", deskripsi: "", kategori: "Pengumuman", tanggalMulai: "", tanggalSelesai: "", penting: false });
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState("");
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
   const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7;
@@ -900,6 +908,24 @@ function AcademicCalendarView({
   const handleRefresh = async () => {
     setRefreshing(true);
     try { await onRefresh(); } finally { setRefreshing(false); }
+  };
+  const startEditEvent = (event: AcademicCalendarEvent) => {
+    if (role !== "Admin") return;
+    setEditingEventId(event.id);
+    setEditDraft({ judul: event.judul, deskripsi: event.deskripsi, kategori: event.kategori, tanggalMulai: event.tanggalMulai, tanggalSelesai: event.tanggalSelesai ?? "", penting: event.penting });
+    setEditError("");
+  };
+  const saveEditedEvent = async () => {
+    if (role !== "Admin" || !editingEventId) return;
+    if (!editDraft.judul.trim() || !editDraft.tanggalMulai || (editDraft.tanggalSelesai && editDraft.tanggalSelesai < editDraft.tanggalMulai)) {
+      setEditError("Lengkapi judul dan tanggal dengan benar."); return;
+    }
+    setSavingEdit(true); setEditError("");
+    try {
+      await onUpdateEvent(editingEventId, { judul: editDraft.judul.trim(), deskripsi: editDraft.deskripsi, kategori: editDraft.kategori, tanggal_mulai: editDraft.tanggalMulai, tanggal_selesai: editDraft.tanggalSelesai || null, penting: editDraft.penting });
+      setEditingEventId(null);
+    } catch (error) { setEditError(error instanceof Error ? error.message : "Perubahan agenda gagal disimpan."); }
+    finally { setSavingEdit(false); }
   };
   const formatDate = (value: string) => new Date(`${value}T12:00:00+07:00`).toLocaleDateString("id-ID", {
     timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric",
@@ -963,6 +989,16 @@ function AcademicCalendarView({
               <h4 className="mt-2 text-sm font-bold text-slate-900">{event.judul}</h4>
               {event.deskripsi && <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-slate-600">{event.deskripsi}</p>}
               {event.tanggalSelesai && event.tanggalSelesai !== event.tanggalMulai && <p className="mt-2 text-[10px] font-semibold text-slate-400">{formatDate(event.tanggalMulai)} – {formatDate(event.tanggalSelesai)}</p>}
+              {role === "Admin" && <button type="button" onClick={() => startEditEvent(event)} className="mt-3 rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-50">Edit</button>}
+              {editingEventId === event.id && <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
+                <input value={editDraft.judul} onChange={(e) => setEditDraft((d) => ({ ...d, judul: e.target.value }))} placeholder="Judul agenda" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                <input value={editDraft.kategori} onChange={(e) => setEditDraft((d) => ({ ...d, kategori: e.target.value }))} placeholder="Kategori" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                <div className="grid grid-cols-2 gap-2"><label className="text-xs text-slate-500">Tanggal mulai<input type="date" value={editDraft.tanggalMulai} onChange={(e) => setEditDraft((d) => ({ ...d, tanggalMulai: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" /></label><label className="text-xs text-slate-500">Tanggal selesai<input type="date" value={editDraft.tanggalSelesai} onChange={(e) => setEditDraft((d) => ({ ...d, tanggalSelesai: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" /></label></div>
+                <textarea value={editDraft.deskripsi} onChange={(e) => setEditDraft((d) => ({ ...d, deskripsi: e.target.value }))} placeholder="Deskripsi" rows={3} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-600"><input type="checkbox" checked={editDraft.penting} onChange={(e) => setEditDraft((d) => ({ ...d, penting: e.target.checked }))} /> Tandai sebagai agenda penting</label>
+                {editError && <p className="text-xs text-rose-600">{editError}</p>}
+                <div className="flex gap-2"><button type="button" disabled={savingEdit} onClick={saveEditedEvent} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-60">{savingEdit ? "Menyimpan…" : "Simpan Perubahan"}</button><button type="button" onClick={() => setEditingEventId(null)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold">Batal</button></div>
+              </div>}
             </article>) : <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center"><p className="text-sm font-semibold text-slate-600">Tidak ada agenda pada tanggal ini.</p><p className="mt-1 text-xs text-slate-400">Pilih tanggal bertanda titik untuk melihat kegiatan.</p></div>}
           </div>
         </section>
@@ -3258,6 +3294,13 @@ export default function Home() {
         tanggalMulai: event.tanggal_mulai, tanggalSelesai: event.tanggal_selesai ?? null, penting: Boolean(event.penting),
       })),
     }));
+  };
+
+  const updateAcademicCalendarEvent = async (id: string, payload: { judul: string; deskripsi: string; kategori: string; tanggal_mulai: string; tanggal_selesai: string | null; penting: boolean }) => {
+    if (role !== "Admin") throw new Error("Hanya Admin yang dapat mengubah agenda.");
+    const { error } = await supabase.from("school_events").update(payload).eq("id", id);
+    if (error) throw error;
+    await loadAcademicCalendar();
   };
 
   const loadStudentParentDashboard = async (userRole: Role, userId: string) => {
@@ -6231,6 +6274,8 @@ if (!loggedIn) {
               <AcademicCalendarView
                 events={dashboardSchoolStats.schoolEvents ?? []}
                 onRefresh={loadAcademicCalendar}
+                role={role}
+                onUpdateEvent={updateAcademicCalendarEvent}
               />
             </Section>
           )}
@@ -7320,6 +7365,7 @@ if (!loggedIn) {
                             type="text"
                             list="tahfidz-student-options"
                             value={tahfidzStudentSearch || (gradeStudents.find((student) => student.id === selectedTahfidzStudentId)?.name ?? "")}
+                            onFocus={(e) => e.currentTarget.select()}
                             onChange={(e) => {
                               const value = e.target.value;
                               setTahfidzStudentSearch(value);
@@ -7345,7 +7391,7 @@ if (!loggedIn) {
                             <h4 className="font-semibold text-gray-900">Tambah Setoran Hafalan</h4>
                             <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                               <label className="text-xs font-semibold text-gray-600">Tanggal<input type="date" value={tahfidzSetoranForm.tanggal} disabled={!canEditGrades} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, tanggal: e.target.value }))} className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" /></label>
-                              <label className="text-xs font-semibold text-gray-600">Nama Surat<input value={tahfidzSetoranForm.namaSurat} disabled={!canEditGrades} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, namaSurat: e.target.value }))} placeholder="Contoh: An-Nas" className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" /></label>
+                              <label className="text-xs font-semibold text-gray-600">Nama Surat<input list="tahfidz-surat-options" value={tahfidzSetoranForm.namaSurat} disabled={!canEditGrades} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, namaSurat: e.target.value }))} placeholder="Cari/pilih surat (An-Naba–An-Nas)" className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" /><datalist id="tahfidz-surat-options">{["An-Naba", "An-Nazi'at", "'Abasa", "At-Takwir", "Al-Infitar", "Al-Mutaffifin", "Al-Insyiqaq", "Al-Buruj", "At-Tariq", "Al-A'la", "Al-Ghasyiyah", "Al-Fajr", "Al-Balad", "Asy-Syams", "Al-Lail", "Ad-Duha", "Asy-Syarh", "At-Tin", "Al-'Alaq", "Al-Qadr", "Al-Bayyinah", "Az-Zalzalah", "Al-'Adiyat", "Al-Qari'ah", "At-Takasur", "Al-'Asr", "Al-Humazah", "Al-Fil", "Quraisy", "Al-Ma'un", "Al-Kausar", "Al-Kafirun", "An-Nasr", "Al-Lahab", "Al-Ikhlas", "Al-Falaq", "An-Nas"].map((surat) => <option key={surat} value={surat} />)}</datalist></label>
                               <label className="text-xs font-semibold text-gray-600">Status<select value={tahfidzSetoranForm.status} disabled={!canEditGrades} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, status: e.target.value as "Tuntas" | "Ulang" }))} className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm"><option value="Tuntas">Tuntas</option><option value="Ulang">Ulang</option></select></label>
                               <label className="text-xs font-semibold text-gray-600">Nilai Angka<input type="number" min="0" max="100" value={tahfidzSetoranForm.nilai} disabled={!canEditGrades} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, nilai: e.target.value }))} className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" placeholder="0–100" /></label>
                               <label className="text-xs font-semibold text-gray-600">Predikat<input value={tahfidzSetoranForm.predikat} disabled={!canEditGrades} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, predikat: e.target.value }))} placeholder="Contoh: A" className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" /></label>
