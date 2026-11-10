@@ -3530,11 +3530,19 @@ export default function Home() {
       let loginAssignments: { subjectId: string; subjectName: string; subjectCode: string; classId: string; className: string; isWaliKelas: boolean }[] = [];
 
       if (resolvedRole === "Guru") {
-        // Ambil tugas mengajar guru.
-        const { data: assignments, error: assignmentsError } = await supabase
-          .from("teaching_assignments")
-          .select("subject_id, class_id, is_wali_kelas, subjects(id, nama, kode), classes(id, nama)")
-          .eq("guru_id", data.user.id);
+        // Ambil tugas mengajar dan penugasan wali kelas secara bersamaan.
+        const [assignmentsResult, waliAssignmentsResult] = await Promise.all([
+          supabase
+            .from("teaching_assignments")
+            .select("subject_id, class_id, is_wali_kelas, subjects(id, nama, kode), classes(id, nama)")
+            .eq("guru_id", data.user.id),
+          supabase
+            .from("wali_kelas_assignments")
+            .select("class_id, tahun_ajaran, aktif, classes(id, nama)")
+            .eq("guru_id", data.user.id)
+            .eq("aktif", true),
+        ]);
+        const { data: assignments, error: assignmentsError } = assignmentsResult;
 
         if (assignmentsError) {
           console.error("Gagal memuat tugas mengajar guru:", assignmentsError);
@@ -3549,12 +3557,8 @@ export default function Home() {
           }));
         }
 
-        // Tambahkan assignment wali kelas dari tabel khusus wali_kelas_assignments.
-        const { data: waliAssignments, error: waliAssignmentsError } = await supabase
-          .from("wali_kelas_assignments")
-          .select("class_id, tahun_ajaran, aktif, classes(id, nama)")
-          .eq("guru_id", data.user.id)
-          .eq("aktif", true);
+        // Tambahkan assignment wali kelas dari hasil query paralel di atas.
+        const { data: waliAssignments, error: waliAssignmentsError } = waliAssignmentsResult;
 
         if (waliAssignmentsError) {
           console.error("Gagal memuat assignment wali kelas:", waliAssignmentsError);
@@ -3670,16 +3674,21 @@ export default function Home() {
       }
 
       setCurrentUserId(data.user.id);
-      await loadSchoolDashboard(resolvedRole, loginAssignments, profile.nama ?? "");
-      await loadGradeSetup(resolvedRole, loginAssignments, data.user.id);
+      // Tiga pemuatan data yang tidak saling bergantung dijalankan bersamaan.
+      // Data absensi dimuat setelahnya karena perhitungan awalnya memakai pilihan
+      // kelas dan mata pelajaran yang baru disetel di atas.
+      await Promise.all([
+        loadSchoolDashboard(resolvedRole, loginAssignments, profile.nama ?? ""),
+        loadGradeSetup(resolvedRole, loginAssignments, data.user.id),
+        loadStudentParentDashboard(resolvedRole, data.user.id),
+      ]);
       await loadAttendanceData();
-      await loadStudentParentDashboard(resolvedRole, data.user.id);
 
       setLoginFeedback({
         type: "success",
         message: `Selamat datang, ${profile.nama ?? "pengguna"}! Anda berhasil masuk sebagai ${resolvedRole}.`,
       });
-      await new Promise((resolve) => window.setTimeout(resolve, 950));
+      // Tidak ada jeda buatan setelah autentikasi dan pemuatan data selesai.
       setLoggedIn(true);
       setActiveMenu("Dashboard");
       setSelectedSubject(null);

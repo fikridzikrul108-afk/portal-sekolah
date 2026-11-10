@@ -199,21 +199,24 @@ export default function PortalLogin({
     <div className="portal-wrapper">
       <style jsx global>{`
         .portal-wrapper {
-          position: fixed;
-          inset: 0;
-          width: 100vw;
-          height: 100vh;
-          height: 100dvh;
-          z-index: 50;
+          position: relative;
+          width: calc(100% - 24px);
+          min-height: calc(100vh - 24px);
+          min-height: calc(100dvh - 24px);
+          margin: max(12px, env(safe-area-inset-top)) auto max(12px, env(safe-area-inset-bottom));
+          box-sizing: border-box;
+          z-index: 1;
           overflow-y: auto;
           overflow-x: hidden;
+          border-radius: 24px;
           background: radial-gradient(135% 100% at 85% 15%, #0080ff 0%, #0056d6 38%, #003da8 75%, #00226b 100%);
           color: #ffffff;
           font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
           display: flex;
           flex-direction: column;
-          justify-content: space-between;
+          justify-content: center;
           -webkit-overflow-scrolling: touch;
+          box-shadow: 0 12px 36px rgba(0, 25, 80, 0.18);
         }
 
         @keyframes entranceFadeUp {
@@ -274,7 +277,7 @@ export default function PortalLogin({
           width: 100%;
           max-width: 1280px;
           margin: 0 auto;
-          padding: 24px 20px;
+          padding: 22px 16px;
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -358,6 +361,12 @@ export default function PortalLogin({
 
         @media (min-width: 1024px) {
           .portal-wrapper {
+            width: 100%;
+            min-height: 100vh;
+            min-height: 100dvh;
+            margin: 0;
+            border-radius: 0;
+            box-shadow: none;
             overflow: hidden;
           }
           .portal-container {

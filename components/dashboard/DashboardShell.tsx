@@ -113,21 +113,13 @@ function SidebarBrand({ role, compact }: { role: Role; compact?: boolean }) {
   );
 }
 
-function SidebarFooter({ role, name, onLogout, mobile }: { role: Role; name: string; onLogout: () => void; mobile?: boolean }) {
+function SidebarFooter({ role, name, mobile }: { role: Role; name: string; mobile?: boolean }) {
   return (
     <div className={`shrink-0 border-t border-white/10 p-4 ${mobile ? "pb-[max(1rem,env(safe-area-inset-bottom))]" : ""}`}>
       <div className="mb-3 rounded-xl bg-white/5 p-3 ring-1 ring-white/10">
         <p className="truncate text-xs font-semibold text-white">{name}</p>
         <p className="mt-0.5 truncate text-[11px] text-slate-400">{role}</p>
       </div>
-      <button
-        type="button"
-        onClick={onLogout}
-        className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-400 transition-all duration-300 hover:bg-red-500/10 hover:text-red-400 touch-manipulation"
-      >
-        <MenuIcon name="logout" size={17} />
-        Keluar dari Portal
-      </button>
     </div>
   );
 }
@@ -162,7 +154,7 @@ export default function DashboardShell({
     }
   };
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 antialiased dark:bg-slate-950">
+    <div className="min-h-screen bg-slate-100 px-2 py-2 text-slate-900 antialiased dark:bg-slate-950 sm:px-0 sm:py-0 dark:sm:bg-slate-950">
       {/* ===== Sidebar desktop ===== */}
       <aside className="fixed left-0 top-0 z-30 hidden h-screen w-[272px] flex-col border-r border-white/5 bg-slate-900 shadow-xl shadow-slate-900/20 lg:flex">
         <div className="flex h-[72px] shrink-0 items-center border-b border-white/10 px-6">
@@ -173,7 +165,7 @@ export default function DashboardShell({
           <NavGroups role={role} activeMenu={activeMenu} onOpenMenu={onOpenMenu} variant="desktop" />
         </div>
 
-        <SidebarFooter role={role} name={name} onLogout={onLogout} />
+        <SidebarFooter role={role} name={name} />
       </aside>
 
       {/* ===== Sidebar mobile ===== */}
@@ -182,16 +174,16 @@ export default function DashboardShell({
           type="button"
           aria-label="Tutup menu"
           onClick={() => setMobileMenuOpen(false)}
-          className="fixed inset-0 z-40 bg-slate-950/60 backdrop-blur-sm lg:hidden"
+          className="fixed inset-0 z-40 bg-slate-950/55 backdrop-blur-sm lg:hidden"
         />
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-[min(88vw,320px)] flex-col border-r border-white/5 bg-slate-900 shadow-2xl transition-transform duration-300 ease-out lg:hidden ${
-          mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+        className={`fixed inset-y-[max(0.75rem,env(safe-area-inset-top))] left-3 z-50 flex w-[min(86vw,320px)] flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-900 shadow-2xl transition-transform duration-300 ease-out lg:hidden ${
+          mobileMenuOpen ? "translate-x-0" : "-translate-x-[calc(100%+1rem)]"
         }`}
       >
-        <div className="flex h-[72px] shrink-0 items-center justify-between border-b border-white/10 px-5">
+        <div className="flex h-[68px] shrink-0 items-center justify-between border-b border-white/10 px-5 pt-[env(safe-area-inset-top)]">
           <SidebarBrand role={role} compact />
           <button
             type="button"
@@ -207,13 +199,13 @@ export default function DashboardShell({
           <NavGroups role={role} activeMenu={activeMenu} onOpenMenu={onOpenMenu} variant="mobile" />
         </div>
 
-        <SidebarFooter role={role} name={name} onLogout={onLogout} mobile />
+        <SidebarFooter role={role} name={name} mobile />
       </aside>
 
       {/* ===== Navbar atas + konten ===== */}
-      <main className="lg:pl-[272px]">
-        <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="mx-auto flex h-[72px] w-full max-w-[1600px] items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
+      <main className="min-w-0 lg:pl-[272px]">
+        <header className="sticky top-2 z-20 mx-1 rounded-2xl border border-slate-200/70 bg-white/95 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/95 sm:top-0 sm:mx-0 sm:rounded-none sm:border-x-0 sm:border-t-0">
+          <div className="mx-auto flex h-[64px] w-full max-w-[1600px] items-center justify-between gap-2 px-3 sm:h-[72px] sm:gap-3 sm:px-6 lg:px-8">
             <div className="flex min-w-0 items-center gap-3">
               <button
                 type="button"
@@ -320,7 +312,7 @@ export default function DashboardShell({
         </div>}
 
         {/* Area konten: dibatasi 1600px, di tengah, dengan jarak konsisten */}
-        <div className="mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8">{children}</div>
+        <div className="mx-auto w-full max-w-[1600px] px-2 py-3 sm:p-6 lg:p-8">{children}</div>
       </main>
     </div>
   );
