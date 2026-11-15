@@ -99,19 +99,19 @@ export default function StaffDashboard({ name, role, currentUserId, dashboardLoa
   };
 
   return <>
-    <div className="mb-6 flex items-start justify-between gap-3">
-      <div className="relative min-w-0 flex-1 overflow-hidden rounded-2xl bg-slate-900 p-6 text-white shadow-xl sm:p-7">
-        <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full bg-emerald-400/20 blur-2xl" />
-        <div className="relative">
-          <p className="text-sm font-medium text-slate-300">Selamat datang kembali,</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight">{name} 👋</h1>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-300">Anda masuk sebagai {role}. Berikut pemantauan kegiatan sekolah.</p>
-          <p className="mt-3 text-xs font-semibold text-emerald-200">{todayLabel}</p>
+    <div className="mb-6 flex items-start justify-between gap-3 md:mb-8">
+      <div className="relative min-w-0 flex-1 overflow-hidden rounded-2xl bg-slate-900 p-6 text-white shadow-xl sm:p-7 md:rounded-[28px] md:bg-gradient-to-r md:from-blue-700 md:via-blue-600 md:to-cyan-600 md:p-9 md:shadow-[0_22px_55px_-25px_rgba(37,99,235,0.65)]">
+        <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full bg-emerald-400/20 blur-2xl md:h-80 md:w-80 md:bg-cyan-200/20" />
+        <div className="relative md:max-w-3xl">
+          <p className="text-sm font-medium text-slate-300 md:text-blue-100">Selamat datang kembali,</p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight md:text-4xl md:leading-tight">{name} 👋</h1>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-300 md:text-base md:leading-7 md:text-blue-50">Anda masuk sebagai {role}. Berikut pemantauan kegiatan sekolah.</p>
+          <p className="mt-3 text-xs font-semibold text-emerald-200 md:mt-5 md:inline-flex md:rounded-full md:bg-white/15 md:px-3 md:py-1.5 md:text-blue-50">{todayLabel}</p>
         </div>
       </div>
     </div>
 
-    {(managementDashboard || role === "Guru") && <section className="mb-6 rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-5 shadow-sm sm:p-6">
+    {(managementDashboard || role === "Guru") && <section className="mb-6 rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-5 shadow-sm sm:p-6 md:rounded-[26px] md:border-slate-200 md:bg-white md:p-7 md:shadow-[0_12px_35px_-25px_rgba(15,23,42,0.35)]">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div><p className="text-xs font-bold uppercase tracking-wider text-emerald-700">Pusat informasi sekolah</p><h2 className="mt-1 text-lg font-bold text-slate-900">Informasi & Pengumuman</h2><p className="mt-1 text-sm text-slate-500">{role === "Guru" ? "Menampilkan agenda dan pengumuman sekolah pada bulan terpilih. Agenda bulan lain tersedia di Kalender Akademik." : "Menampilkan agenda penting pada satu bulan terpilih. Agenda bulan lain tersedia di Kalender Akademik."}</p></div>
         <div className="flex flex-wrap items-center gap-2">
@@ -147,7 +147,7 @@ export default function StaffDashboard({ name, role, currentUserId, dashboardLoa
       </article>)}</div> : <div className="rounded-xl border border-dashed border-emerald-200 bg-white/80 p-5 text-center"><p className="text-sm font-semibold text-slate-700">{role === "Guru" ? "Belum ada informasi sekolah pada bulan ini." : "Belum ada agenda penting pada bulan ini."}</p><p className="mt-1 text-xs text-slate-500">Belum ada agenda penting pada bulan yang dipilih. Pilih bulan lain atau buat pengumuman baru. Agenda pendukung tetap tersedia di Kalender Akademik.</p></div>}
     </section>}
 
-    <div className={`grid gap-4 sm:grid-cols-2 ${managementDashboard ? "xl:grid-cols-4" : "xl:grid-cols-3"}`}>
+    <div className={`grid gap-4 sm:grid-cols-2 md:gap-5 ${managementDashboard ? "xl:grid-cols-4" : "xl:grid-cols-3"}`}>
       <StatCard title={role === "Guru" ? "Siswa Kelas Saya" : "Total Siswa"} value={dashboardLoading ? "…" : String(stats.totalSiswa)} detail={role === "Guru" ? "Siswa dari kelas yang diampu" : "Siswa aktif dari database"} icon="students" />
       <StatCard title="Total Guru" value={dashboardLoading ? "…" : String(stats.totalGuru)} detail="Data guru dari master sekolah" icon="teachers" />
       <StatCard title={role === "Guru" ? "Kelas Saya" : "Rombel"} value={dashboardLoading ? "…" : String(stats.totalRombel)} detail={role === "Guru" ? "Kelas yang ditugaskan" : "Kelas dari database"} icon="dashboard" />
@@ -155,20 +155,20 @@ export default function StaffDashboard({ name, role, currentUserId, dashboardLoa
     </div>
 
     {managementDashboard && <>
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
-        <button type="button" onClick={() => setDetailPanel((current) => current === "morning" ? null : "morning")} className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-emerald-300 hover:shadow-md">
+      <div className="mt-6 grid gap-4 md:grid-cols-3 md:gap-5">
+        <button type="button" onClick={() => setDetailPanel((current) => current === "morning" ? null : "morning")} className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-emerald-300 hover:shadow-md md:rounded-[24px] md:border-slate-200 md:p-6 md:shadow-[0_10px_30px_-24px_rgba(15,23,42,0.45)] md:hover:-translate-y-1">
           <div className="flex items-center justify-between"><span className="text-sm font-semibold text-slate-500">Kehadiran Guru Pagi</span><MenuIcon name="teachers" size={21}/></div>
           <p className="mt-2 text-3xl font-bold text-slate-900">{dashboardLoading ? "…" : `${stats.teacherMorningPercent ?? 0}%`}</p>
           <p className="mt-1 text-xs text-slate-500">{stats.teacherMorningPresent ?? 0} hadir dari {stats.teacherMorningTotal ?? 0} guru wajib hadir</p>
           <p className="mt-3 text-xs font-bold text-emerald-700">Lihat guru sudah/belum absen →</p>
         </button>
-        <button type="button" onClick={() => setDetailPanel((current) => current === "students" ? null : "students")} className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-emerald-300 hover:shadow-md">
+        <button type="button" onClick={() => setDetailPanel((current) => current === "students" ? null : "students")} className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-emerald-300 hover:shadow-md md:rounded-[24px] md:border-slate-200 md:p-6 md:shadow-[0_10px_30px_-24px_rgba(15,23,42,0.45)] md:hover:-translate-y-1">
           <div className="flex items-center justify-between"><span className="text-sm font-semibold text-slate-500">Absensi Siswa Hari Ini</span><MenuIcon name="attendance" size={21}/></div>
           <p className="mt-2 text-3xl font-bold text-slate-900">{dashboardLoading ? "…" : `${stats.attendancePercent ?? 0}%`}</p>
           <p className="mt-1 text-xs text-slate-500">{stats.attendanceTotal} siswa tercatat dari {stats.totalSiswa} siswa aktif</p>
           <p className="mt-3 text-xs font-bold text-emerald-700">Lihat status setiap kelas →</p>
         </button>
-        <button type="button" onClick={() => setDetailPanel((current) => current === "class" ? null : "class")} className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-emerald-300 hover:shadow-md">
+        <button type="button" onClick={() => setDetailPanel((current) => current === "class" ? null : "class")} className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-emerald-300 hover:shadow-md md:rounded-[24px] md:border-slate-200 md:p-6 md:shadow-[0_10px_30px_-24px_rgba(15,23,42,0.45)] md:hover:-translate-y-1">
           <div className="flex items-center justify-between"><span className="text-sm font-semibold text-slate-500">Absensi Guru di Kelas</span><MenuIcon name="dashboard" size={21}/></div>
           <p className="mt-2 text-3xl font-bold text-slate-900">{dashboardLoading ? "…" : `${stats.classAttendancePercent ?? 0}%`}</p>
           <p className="mt-1 text-xs text-slate-500">{stats.classAttendanceDone ?? 0} dari {stats.classAttendanceExpected ?? 0} kewajiban sampai hari ini</p>
@@ -183,9 +183,9 @@ export default function StaffDashboard({ name, role, currentUserId, dashboardLoa
         {detailPanel === "class" && <div className="overflow-x-auto"><table className="w-full min-w-[640px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Guru</th><th className="p-3">Kelas</th><th className="p-3">Mata Pelajaran</th><th className="p-3">Status</th></tr></thead><tbody>{(stats.classAttendanceTodayRows ?? []).map((row) => <tr key={row.id} className="border-t"><td className="p-3 font-medium">{row.guru}{row.isPiket && <span className="ml-2 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-bold text-violet-700">Pengganti</span>}</td><td className="p-3">{row.kelas}</td><td className="p-3">{row.mapel}</td><td className="p-3"><StatusPill value={row.status}/></td></tr>)}</tbody></table>{!stats.classAttendanceTodayRows?.length && <p className="p-5 text-center text-sm text-slate-500">Tidak ada kewajiban absensi kelas pada hari ini.</p>}</div>}
       </section>}
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-2">
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex items-center justify-between"><div><h3 className="font-bold text-slate-900">Aktivitas Terbaru</h3><p className="mt-1 text-xs text-slate-500">Aktivitas pengguna yang tercatat di sistem.</p></div><button type="button" onClick={() => onOpenMenu("Absensi")} className="text-xs font-bold text-emerald-700">Buka absensi →</button></div><div className="mt-4 space-y-4">{activityRows.length === 0 ? <p className="text-sm text-slate-500">Belum ada aktivitas tercatat.</p> : activityRows.slice(0, 8).map((item) => <Activity key={item.id} title={`${item.actor_name || "Pengguna"} ${item.action}${item.target_name ? ` — ${item.target_name}` : ""}`} time={new Date(item.created_at).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", timeStyle: "short" })}/>)}</div></section>
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex items-center justify-between"><div><h3 className="font-bold text-slate-900">Akses Cepat</h3><p className="mt-1 text-xs text-slate-500">Buka halaman pemantauan lebih lengkap.</p></div><MenuIcon name="dashboard" size={22}/></div><div className="mt-4 grid gap-2 sm:grid-cols-2"><QuickLink label="Data Guru" onClick={() => onOpenMenu("Data Guru")}/><QuickLink label="Data Siswa" onClick={() => onOpenMenu("Data Siswa")}/><QuickLink label="Jadwal Pelajaran" onClick={() => onOpenMenu("Jadwal")}/><QuickLink label="Absensi" onClick={() => onOpenMenu("Absensi")}/><QuickLink label="Kalender Akademik" onClick={() => onOpenMenu("Kalender Akademik")}/></div><p className="mt-4 text-xs text-slate-400">Kalender akademik juga disediakan sebagai halaman tersendiri.</p></section>
+      <div className="mt-6 grid gap-6 xl:grid-cols-[1.2fr_0.8fr] md:gap-5">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm md:rounded-[26px] md:border-slate-200 md:shadow-[0_12px_35px_-25px_rgba(15,23,42,0.4)]"><div className="flex items-center justify-between"><div><h3 className="font-bold text-slate-900">Aktivitas Terbaru</h3><p className="mt-1 text-xs text-slate-500">Aktivitas pengguna yang tercatat di sistem.</p></div><button type="button" onClick={() => onOpenMenu("Absensi")} className="text-xs font-bold text-emerald-700">Buka absensi →</button></div><div className="mt-4 space-y-4">{activityRows.length === 0 ? <p className="text-sm text-slate-500">Belum ada aktivitas tercatat.</p> : activityRows.slice(0, 8).map((item) => <Activity key={item.id} title={`${item.actor_name || "Pengguna"} ${item.action}${item.target_name ? ` — ${item.target_name}` : ""}`} time={new Date(item.created_at).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", timeStyle: "short" })}/>)}</div></section>
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm md:rounded-[26px] md:border-slate-200 md:shadow-[0_12px_35px_-25px_rgba(15,23,42,0.4)]"><div className="flex items-center justify-between"><div><h3 className="font-bold text-slate-900">Akses Cepat</h3><p className="mt-1 text-xs text-slate-500">Buka halaman pemantauan lebih lengkap.</p></div><MenuIcon name="dashboard" size={22}/></div><div className="mt-4 grid gap-2 sm:grid-cols-2"><QuickLink label="Data Guru" onClick={() => onOpenMenu("Data Guru")}/><QuickLink label="Data Siswa" onClick={() => onOpenMenu("Data Siswa")}/><QuickLink label="Jadwal Pelajaran" onClick={() => onOpenMenu("Jadwal")}/><QuickLink label="Absensi" onClick={() => onOpenMenu("Absensi")}/><QuickLink label="Kalender Akademik" onClick={() => onOpenMenu("Kalender Akademik")}/></div><p className="mt-4 text-xs text-slate-400">Kalender akademik juga disediakan sebagai halaman tersendiri.</p></section>
       </div>
     </>}
 
@@ -228,11 +228,12 @@ export default function StaffDashboard({ name, role, currentUserId, dashboardLoa
   </>;
 }
 function StatusPill({ value }: { value: string }) {
-  const good = value === "Hadir" || value === "Sudah Mengisi" || value === "Lengkap" || value.includes("sudah mengisi");
-  const warn = value === "Sebagian" || value === "Izin" || value === "Sakit" || value === "Pengganti — sudah mengisi";
+  const normalized = value.trim().toLocaleLowerCase("id-ID");
+  const good = normalized === "hadir" || normalized === "sudah mengisi" || normalized === "lengkap" || normalized.includes("sudah mengisi");
+  const warn = normalized === "sebagian" || normalized === "izin" || normalized === "sakit" || normalized === "pengganti — sudah mengisi";
   return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${good ? "bg-emerald-50 text-emerald-700" : warn ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}>{value}</span>;
 }
 function QuickLink({ label, onClick }: { label: string; onClick: () => void }) { return <button type="button" onClick={onClick} className="rounded-xl border border-slate-200 px-3 py-3 text-left text-sm font-semibold text-slate-700 transition hover:border-emerald-300 hover:bg-emerald-50">{label} <span className="float-right text-emerald-700">→</span></button>; }
-function StatCard({title,value,detail,icon}:{title:string;value:string;detail:string;icon:string}) { return <div className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{title}</p><p className="mt-2 text-3xl font-bold tracking-tight text-slate-900">{value}</p><p className="mt-2 text-xs text-slate-500">{detail}</p></div><div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-lg"><MenuIcon name={icon as MenuIconName} size={19}/></div></div></div>; }
+function StatCard({title,value,detail,icon}:{title:string;value:string;detail:string;icon:string}) { return <div className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md md:rounded-[24px] md:border-slate-200 md:bg-gradient-to-br md:from-white md:to-slate-50 md:p-6 md:shadow-[0_12px_32px_-26px_rgba(15,23,42,0.55)]"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{title}</p><p className="mt-2 text-3xl font-bold tracking-tight text-slate-900">{value}</p><p className="mt-2 text-xs text-slate-500">{detail}</p></div><div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-lg md:h-12 md:w-12 md:rounded-2xl md:bg-blue-50 md:text-blue-700"><MenuIcon name={icon as MenuIconName} size={19}/></div></div></div>; }
 function Attendance({title,value}:{title:string;value:string}) { return <div className="rounded-xl bg-gray-50 p-4"><p className="text-sm text-gray-500">{title}</p><p className="mt-1 text-2xl font-bold text-emerald-600">{value}</p></div>; }
 function Activity({title,time}:{title:string;time:string}) { return <div className="flex items-center gap-3"><div className="h-2.5 w-2.5 rounded-full bg-emerald-500"/><div className="flex-1"><p className="text-sm font-medium">{title}</p><p className="text-xs text-gray-400">{time}</p></div></div>; }

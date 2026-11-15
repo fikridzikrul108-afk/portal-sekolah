@@ -724,6 +724,7 @@ type BkRow = {
   student_id: string;
   guru_id: string;
   class_id: string;
+  subject_id: string | null;
   tanggal: string;
   jenis_program: string;
   ringkasan: string;
@@ -731,6 +732,7 @@ type BkRow = {
   status: "dipantau" | "selesai";
   studentName: string;
   className: string;
+  subjectName: string;
   guruName: string;
 };
 
@@ -1102,7 +1104,7 @@ export default function Home() {
   });
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [attendancePanel, setAttendancePanel] = useState<"menu" | "siswa" | "guru" | "rekap-guru" | "rekap-siswa" | "qr-pegawai" | "scan-qr">("menu");
-  const [teacherAttendanceRows, setTeacherAttendanceRows] = useState<(TeacherAttendanceToday & { guru_id: string; nama_guru: string; role_label: string; attendancePercentage: number; attendedWorkdays: number; workdaysElapsed: number; status?: string; izinDays: number; sakitDays: number; alfaDays: number })[]>([]);
+  const [teacherAttendanceRows, setTeacherAttendanceRows] = useState<(TeacherAttendanceToday & { guru_id: string; nama_guru: string; role_label: string; attendancePercentage: number; attendedWorkdays: number; workdaysElapsed: number; status?: string; izinDays: number; sakitDays: number; alfaDays: number; unrecordedDays: number })[]>([]);
   const [teacherAttendanceReportLoading, setTeacherAttendanceReportLoading] = useState(false);
   const [employeeQrRows, setEmployeeQrRows] = useState<{ profile_id: string; qr_token: string; is_active: boolean; nama: string; role: string; foto_url: string | null }[]>([]);
   const [ownEmployeeQr, setOwnEmployeeQr] = useState<{ qr_token: string; is_active: boolean } | null>(null);
@@ -1222,7 +1224,7 @@ export default function Home() {
   const [bkEditingId, setBkEditingId] = useState<string | null>(null);
   const [bkSaving, setBkSaving] = useState(false);
   const [bkForm, setBkForm] = useState({
-    studentId: "", classId: "", tanggal: new Date().toISOString().slice(0, 10),
+    studentId: "", classId: "", subjectId: "", tanggal: new Date().toISOString().slice(0, 10),
     jenisProgram: "Pendampingan belajar", ringkasan: "", tindakLanjut: "", status: "dipantau" as "dipantau" | "selesai",
   });
 
@@ -1507,6 +1509,7 @@ export default function Home() {
       table{width:100%;border-collapse:collapse;table-layout:fixed}
       th,td{border:1px solid #9aa7b4;padding:3px 4px;text-align:left;vertical-align:top;overflow-wrap:anywhere;font-size:8px}
       th{background:#dff4f1;text-align:center;font-weight:bold}
+      th:first-child,td:first-child{width:10mm;text-align:center}
       .signatures{display:flex;justify-content:space-between;margin-top:12px;page-break-inside:avoid;break-inside:avoid}
       .sign{width:28%;text-align:center;min-height:48px;font-size:9px}.line{width:72%;margin:24px auto 0;border-top:1px solid #333;padding-top:4px}
       .print-note{text-align:center;color:#64748b;font-size:9px;margin-top:12px}
@@ -3053,7 +3056,7 @@ export default function Home() {
         teacherMorningRows = morningExpectedProfiles.map((profile: any) => {
           const record: any = morningByProfile.get(profile.id);
           const rawStatus = String(record?.status ?? "").toLowerCase();
-          const status = record?.jam_masuk ? "Hadir" : rawStatus === "izin" ? "Izin" : rawStatus === "sakit" ? "Sakit" : rawStatus === "alfa" ? "Alfa" : "Belum Absen";
+          const status = rawStatus === "hadir" ? "Hadir" : rawStatus === "izin" ? "Izin" : rawStatus === "sakit" ? "Sakit" : rawStatus === "alfa" ? "Alfa" : "Belum Absen";
           return { id: profile.id, nama: profile.nama ?? "Nama belum diatur", status, jamMasuk: record?.jam_masuk ?? null, isPiket: Boolean(profile.is_guru_piket) || String(profile.nama ?? "").toLowerCase().includes("azkiya") };
         }).sort((a, b) => a.status === "Belum Absen" ? -1 : b.status === "Belum Absen" ? 1 : a.nama.localeCompare(b.nama, "id"));
         teacherMorningPresent = teacherMorningRows.filter((row) => row.status === "Hadir").length;
@@ -3530,19 +3533,11 @@ export default function Home() {
       let loginAssignments: { subjectId: string; subjectName: string; subjectCode: string; classId: string; className: string; isWaliKelas: boolean }[] = [];
 
       if (resolvedRole === "Guru") {
-        // Ambil tugas mengajar dan penugasan wali kelas secara bersamaan.
-        const [assignmentsResult, waliAssignmentsResult] = await Promise.all([
-          supabase
-            .from("teaching_assignments")
-            .select("subject_id, class_id, is_wali_kelas, subjects(id, nama, kode), classes(id, nama)")
-            .eq("guru_id", data.user.id),
-          supabase
-            .from("wali_kelas_assignments")
-            .select("class_id, tahun_ajaran, aktif, classes(id, nama)")
-            .eq("guru_id", data.user.id)
-            .eq("aktif", true),
-        ]);
-        const { data: assignments, error: assignmentsError } = assignmentsResult;
+        // Ambil tugas mengajar guru.
+        const { data: assignments, error: assignmentsError } = await supabase
+          .from("teaching_assignments")
+          .select("subject_id, class_id, is_wali_kelas, subjects(id, nama, kode), classes(id, nama)")
+          .eq("guru_id", data.user.id);
 
         if (assignmentsError) {
           console.error("Gagal memuat tugas mengajar guru:", assignmentsError);
@@ -3557,8 +3552,12 @@ export default function Home() {
           }));
         }
 
-        // Tambahkan assignment wali kelas dari hasil query paralel di atas.
-        const { data: waliAssignments, error: waliAssignmentsError } = waliAssignmentsResult;
+        // Tambahkan assignment wali kelas dari tabel khusus wali_kelas_assignments.
+        const { data: waliAssignments, error: waliAssignmentsError } = await supabase
+          .from("wali_kelas_assignments")
+          .select("class_id, tahun_ajaran, aktif, classes(id, nama)")
+          .eq("guru_id", data.user.id)
+          .eq("aktif", true);
 
         if (waliAssignmentsError) {
           console.error("Gagal memuat assignment wali kelas:", waliAssignmentsError);
@@ -3674,21 +3673,16 @@ export default function Home() {
       }
 
       setCurrentUserId(data.user.id);
-      // Tiga pemuatan data yang tidak saling bergantung dijalankan bersamaan.
-      // Data absensi dimuat setelahnya karena perhitungan awalnya memakai pilihan
-      // kelas dan mata pelajaran yang baru disetel di atas.
-      await Promise.all([
-        loadSchoolDashboard(resolvedRole, loginAssignments, profile.nama ?? ""),
-        loadGradeSetup(resolvedRole, loginAssignments, data.user.id),
-        loadStudentParentDashboard(resolvedRole, data.user.id),
-      ]);
+      await loadSchoolDashboard(resolvedRole, loginAssignments, profile.nama ?? "");
+      await loadGradeSetup(resolvedRole, loginAssignments, data.user.id);
       await loadAttendanceData();
+      await loadStudentParentDashboard(resolvedRole, data.user.id);
 
       setLoginFeedback({
         type: "success",
         message: `Selamat datang, ${profile.nama ?? "pengguna"}! Anda berhasil masuk sebagai ${resolvedRole}.`,
       });
-      // Tidak ada jeda buatan setelah autentikasi dan pemuatan data selesai.
+      await new Promise((resolve) => window.setTimeout(resolve, 950));
       setLoggedIn(true);
       setActiveMenu("Dashboard");
       setSelectedSubject(null);
@@ -4156,9 +4150,9 @@ export default function Home() {
         const profileRecords = records.filter((item: any) => profileWorkDates.includes(item.tanggal));
         const todayIsScheduled = isTeacherScheduledOnDate(profile.nama, reportDate);
         const todayRecord = todayIsScheduled ? records.find((item: any) => item.tanggal === reportDate) : undefined;
-        const presentDates = new Set(profileRecords.filter((item: any) => (item.status ?? "hadir") === "hadir" && Boolean(item.jam_masuk)).map((item: any) => item.tanggal));
+        const presentDates = new Set(profileRecords.filter((item: any) => String(item.status ?? "").toLowerCase() === "hadir").map((item: any) => item.tanggal));
         const percentage = profileWorkDates.length ? Math.round((presentDates.size / profileWorkDates.length) * 100) : 0;
-        let status = todayIsScheduled ? "Alfa" : "Tidak terjadwal";
+        let status = todayIsScheduled ? "Belum Absen" : "Tidak terjadwal";
         let statusClass = todayIsScheduled ? "absent" : "";
         const savedStatus = String(todayRecord?.status ?? "hadir").toLowerCase();
         if (!todayIsScheduled) { status = "Tidak terjadwal"; statusClass = ""; }
@@ -4254,16 +4248,18 @@ export default function Home() {
           if (jakartaMinutesNow >= cutoffHour * 60 + cutoffMinute) profileElapsedDates.push(today);
         }
         const records = (attendanceData ?? []).filter((item: any) => item.guru_id === profile.id && profileElapsedDates.includes(item.tanggal));
-        const presentRecords = records.filter((item: any) => (item.status ?? "hadir") === "hadir" && Boolean(item.jam_masuk));
+        const presentRecords = records.filter((item: any) => String(item.status ?? "").toLowerCase() === "hadir");
         const presentDates = new Set(presentRecords.map((item: any) => item.tanggal));
-        const onTime = presentRecords.filter((item: any) => isTeacherOnTime(profile.nama, item.tanggal, item.jam_masuk)).length;
-        const late = presentRecords.length - onTime;
+        const timedPresentRecords = presentRecords.filter((item: any) => Boolean(item.jam_masuk));
+        const onTime = timedPresentRecords.filter((item: any) => isTeacherOnTime(profile.nama, item.tanggal, item.jam_masuk)).length;
+        const late = timedPresentRecords.length - onTime;
         const izin = records.filter((item: any) => item.status === "izin").length;
         const sakit = records.filter((item: any) => item.status === "sakit").length;
-        const alfa = records.filter((item: any) => item.status === "alfa" || (!item.status && !item.jam_masuk)).length;
-        const unrecorded = Math.max(0, profileElapsedDates.length - presentDates.size - izin - sakit - alfa);
+        const alfa = records.filter((item: any) => String(item.status ?? "").toLowerCase() === "alfa").length;
+        const recordedDates = new Set(records.map((item: any) => item.tanggal));
+        const unrecorded = profileElapsedDates.filter((date) => !recordedDates.has(date)).length;
         const percentage = profileFullMonthDates.length ? Math.round((presentDates.size / profileFullMonthDates.length) * 100) : 0;
-        return `<tr><td class="center">${index + 1}</td><td>${esc(profile.nama ?? "Nama belum diatur")}</td><td>${esc(roleLabels[String(profile.role ?? "").toLowerCase()] ?? profile.role ?? "Pegawai")}</td><td class="center">${presentDates.size}</td><td class="center">${profileFullMonthDates.length}</td><td class="center ontime">${onTime}</td><td class="center late">${late}</td><td class="center">${izin}</td><td class="center">${sakit}</td><td class="center absent">${alfa + unrecorded}</td><td class="center"><b>${percentage}%</b></td></tr>`;
+        return `<tr><td class="center">${index + 1}</td><td>${esc(profile.nama ?? "Nama belum diatur")}</td><td>${esc(roleLabels[String(profile.role ?? "").toLowerCase()] ?? profile.role ?? "Pegawai")}</td><td class="center">${presentDates.size}</td><td class="center">${profileFullMonthDates.length}</td><td class="center ontime">${onTime}</td><td class="center late">${late}</td><td class="center">${izin}</td><td class="center">${sakit}</td><td class="center absent">${alfa}</td><td class="center absent">${unrecorded}</td><td class="center"><b>${percentage}%</b></td></tr>`;
       }).join("");
 
       // Halaman berikutnya memakai format laporan harian yang sudah ada,
@@ -4281,7 +4277,7 @@ export default function Home() {
           const scheduled = isTeacherScheduledOnDate(profile.nama, date);
           const record = scheduled ? (attendanceData ?? []).find((item: any) => item.guru_id === profile.id && item.tanggal === date) : undefined;
           const savedStatus = String(record?.status ?? "hadir").toLowerCase();
-          let status = scheduled ? "Alfa" : "Tidak terjadwal";
+          let status = scheduled ? "Belum Absen" : "Tidak terjadwal";
           let statusClass = scheduled ? "absent" : "";
           if (!scheduled) { status = "Tidak terjadwal"; statusClass = ""; }
           else if (savedStatus === "izin") { status = "Izin"; statusClass = "absent"; }
@@ -4300,7 +4296,7 @@ export default function Home() {
       }).join("");
       const title = `Rekap Absensi Pegawai Bulanan dan Harian — ${monthLabel}`;
       printWindow.document.open();
-      printWindow.document.write(`<!doctype html><html><head><meta charset="UTF-8"><title>${esc(title)}</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:10px}h1{font-size:19px;margin:0 0 5px}h2{font-size:14px;margin:0 0 6px}p{margin:4px 0 12px;color:#444;font-size:10px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #cbd5e1;padding:7px 6px;text-align:left;overflow-wrap:anywhere}th{background:#e2e8f0;font-size:10px}td{font-size:10px}.center{text-align:center}.ontime{color:#166534;background:#dcfce7}.late{color:#991b1b;background:#fee2e2}.absent{color:#475569;background:#f1f5f9}.note,.legend{margin-top:10px;font-size:9px;color:#475569}.monthly-signature{width:100%;margin-top:4px;text-align:right;padding-right:45px;font-size:10px;line-height:1.25;break-inside:avoid;page-break-inside:avoid}.signature-space{height:24px}.daily-page{break-before:page;page-break-before:always}.daily-page:first-of-type{break-before:page}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><h1>${esc(schoolSettings.namaSekolah || "SD Islam Al-Barkah")}</h1><h2>Rekap Absensi Pegawai Bulanan</h2><p>Bulan laporan: <b>${esc(monthLabel)}</b> · Total hari wajib dihitung untuk satu bulan penuh sesuai jadwal masing-masing pegawai. Kehadiran, izin, sakit, dan alfa dicatat sampai tanggal ${esc(new Date(`${reportEndDate}T12:00:00+07:00`).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" }))}.</p><table><thead><tr><th style="width:4%">No.</th><th style="width:21%">Nama Pegawai</th><th style="width:15%">Jabatan</th><th style="width:9%">Hari Hadir</th><th style="width:9%">Hari Wajib</th><th style="width:10%">Tepat Waktu</th><th style="width:8%">Terlambat</th><th style="width:7%">Izin</th><th style="width:7%">Sakit</th><th style="width:10%">Alfa / Belum tercatat</th><th style="width:7%">Persentase</th></tr></thead><tbody>${rows}</tbody></table><div class="note">Hijau: tepat waktu sesuai batas masing-masing guru. Merah: terlambat setelah batas jadwal. Perhitungan hari kerja mengikuti jadwal masing-masing guru. Abu-abu: tidak hadir. Persentase = hari hadir ÷ total hari wajib satu bulan penuh sesuai jadwal. Tanggal setelah tanggal laporan belum dihitung sebagai alfa/belum tercatat. Rekap otomatis dihitung dari data absensi yang tersimpan.</div><div class="monthly-signature"><div>Bandung, 30 November 2026</div><div>Mengetahui,</div><div>Kepala Sekolah</div><div class="signature-space"></div><div><b>Sofian, S.Pd.I., M.Pd., Gr.</b></div><div>NIP. ____________________</div></div>${dailyPages}<script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250)};</script></body></html>`);
+      printWindow.document.write(`<!doctype html><html><head><meta charset="UTF-8"><title>${esc(title)}</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:10px}h1{font-size:19px;margin:0 0 5px}h2{font-size:14px;margin:0 0 6px}p{margin:4px 0 12px;color:#444;font-size:10px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #cbd5e1;padding:7px 6px;text-align:left;overflow-wrap:anywhere}th{background:#e2e8f0;font-size:10px}td{font-size:10px}.center{text-align:center}.ontime{color:#166534;background:#dcfce7}.late{color:#991b1b;background:#fee2e2}.absent{color:#475569;background:#f1f5f9}.note,.legend{margin-top:10px;font-size:9px;color:#475569}.monthly-signature{width:100%;margin-top:4px;text-align:right;padding-right:45px;font-size:10px;line-height:1.25;break-inside:avoid;page-break-inside:avoid}.signature-space{height:24px}.daily-page{break-before:page;page-break-before:always}.daily-page:first-of-type{break-before:page}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><h1>${esc(schoolSettings.namaSekolah || "SD Islam Al-Barkah")}</h1><h2>Rekap Absensi Pegawai Bulanan</h2><p>Bulan laporan: <b>${esc(monthLabel)}</b> · Total hari wajib dihitung untuk satu bulan penuh sesuai jadwal masing-masing pegawai. Kehadiran, izin, sakit, dan alfa dicatat sampai tanggal ${esc(new Date(`${reportEndDate}T12:00:00+07:00`).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" }))}.</p><table><thead><tr><th style="width:4%">No.</th><th style="width:19%">Nama Pegawai</th><th style="width:13%">Jabatan</th><th style="width:8%">Hari Hadir</th><th style="width:8%">Hari Wajib</th><th style="width:9%">Tepat Waktu</th><th style="width:7%">Terlambat</th><th style="width:6%">Izin</th><th style="width:6%">Sakit</th><th style="width:6%">Alfa</th><th style="width:8%">Belum Absen</th><th style="width:6%">Persentase</th></tr></thead><tbody>${rows}</tbody></table><div class="note">Hijau: tepat waktu sesuai batas masing-masing guru. Merah: terlambat setelah batas jadwal. Hadir manual/Daring tetap dihitung hadir meskipun jam masuk kosong. Perhitungan hari kerja mengikuti jadwal masing-masing guru. Alfa hanya dihitung dari status alfa yang tersimpan; tanggal wajib tanpa catatan ditampilkan terpisah sebagai Belum Absen. Persentase = hari hadir ÷ total hari wajib satu bulan penuh sesuai jadwal. Tanggal setelah tanggal laporan belum dihitung. Rekap otomatis dihitung dari data absensi yang tersimpan.</div><div class="monthly-signature"><div>Bandung, 30 November 2026</div><div>Mengetahui,</div><div>Kepala Sekolah</div><div class="signature-space"></div><div><b>Sofian, S.Pd.I., M.Pd., Gr.</b></div><div>NIP. ____________________</div></div>${dailyPages}<script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250)};</script></body></html>`);
       printWindow.document.close();
     } catch (error) {
       const message = String(error instanceof Error ? error.message : "Terjadi kesalahan.");
@@ -4360,20 +4356,16 @@ export default function Home() {
         const [cutoffHour, cutoffMinute] = getTeacherMorningCutoff(profile.nama, jakartaToday).split(":").map(Number);
         const todayCutoffPassed = jakartaMinutesNow >= cutoffHour * 60 + cutoffMinute;
         if (todayIsScheduled && todayCutoffPassed) scheduledElapsed.push(jakartaToday);
-        const attendedDates = new Set(personRecords.filter((item: any) => (item.status ?? "hadir") === "hadir" && Boolean(item.jam_masuk) && scheduledElapsed.includes(item.tanggal)).map((item: any) => item.tanggal));
+        const attendedDates = new Set(personRecords.filter((item: any) => String(item.status ?? "").toLowerCase() === "hadir" && scheduledElapsed.includes(item.tanggal)).map((item: any) => item.tanggal));
         const izinDays = personRecords.filter((item: any) => item.status === "izin" && scheduledElapsed.includes(item.tanggal)).length;
         const sakitDays = personRecords.filter((item: any) => item.status === "sakit" && scheduledElapsed.includes(item.tanggal)).length;
-        // Alfa otomatis: hanya tanggal wajib yang sudah terlewati (atau hari ini
-        // setelah cutoff), dan tidak memiliki absensi Hadir maupun status Izin/Sakit
-        // dari Admin. Status alfa yang diinput Admin juga tetap dihitung.
-        const alfaDays = scheduledElapsed.filter((date) => {
-          const dayRecord = personRecords.find((item: any) => item.tanggal === date);
-          if (!dayRecord) return true;
-          const status = String(dayRecord.status ?? "").toLowerCase();
-          if (status === "izin" || status === "sakit") return false;
-          if (status === "hadir" && Boolean(dayRecord.jam_masuk)) return false;
-          return status === "alfa" || !dayRecord.jam_masuk;
-        }).length;
+        // Status Alfa hanya berasal dari catatan Alfa yang tersimpan.
+        // Tanggal wajib tanpa catatan dihitung terpisah sebagai Belum Absen.
+        const alfaDays = personRecords.filter((item: any) =>
+          String(item.status ?? "").toLowerCase() === "alfa" && scheduledElapsed.includes(item.tanggal)
+        ).length;
+        const recordedDates = new Set(personRecords.map((item: any) => item.tanggal));
+        const unrecordedDays = scheduledElapsed.filter((date) => !recordedDates.has(date)).length;
         const latestRecord = personRecords[0];
         const attendedWorkdays = attendedDates.size;
         const attendancePercentage = scheduledFullMonth.length ? Math.round((attendedWorkdays / scheduledFullMonth.length) * 100) : 0;
@@ -4393,10 +4385,11 @@ export default function Home() {
           latitude_pulang: latestRecord?.latitude_pulang ?? null,
           longitude_pulang: latestRecord?.longitude_pulang ?? null,
           alamat_pulang: latestRecord?.alamat_pulang ?? null,
-          status: latestRecord?.status ?? "hadir",
+          status: latestRecord?.status ?? "Belum Absen",
           izinDays,
           sakitDays,
           alfaDays,
+          unrecordedDays,
           attendancePercentage,
           attendedWorkdays,
           workdaysElapsed: scheduledFullMonth.length,
@@ -5777,20 +5770,21 @@ export default function Home() {
     await loadRemedialData();
   };
 
-  const loadBkData = async () => {
+  const loadBkData = async (classIdOverride?: string) => {
     setBkLoading(true);
     setBkError("");
     await loadProgramOptions("bk");
     let query = supabase.from("program_bk").select(`
-      id, student_id, guru_id, class_id, tanggal, jenis_program, ringkasan, tindak_lanjut, status,
-      students(nama), classes(nama), profiles!program_bk_guru_id_fkey(nama)
+      id, student_id, guru_id, class_id, subject_id, tanggal, jenis_program, ringkasan, tindak_lanjut, status,
+      students(nama), classes(nama), subjects(nama), profiles!program_bk_guru_id_fkey(nama)
     `).order("tanggal", { ascending: false });
     if (role === "Siswa") {
       const studentId = await getCurrentStudentId();
       if (!studentId) { setBkRows([]); setBkLoading(false); return; }
       query = query.eq("student_id", studentId);
-    } else if (bkClassId) {
-      query = query.eq("class_id", bkClassId);
+    } else {
+      const selectedClassId = classIdOverride === undefined ? bkClassId : classIdOverride;
+      if (selectedClassId) query = query.eq("class_id", selectedClassId);
     }
     if (bkStatusFilter !== "all") query = query.eq("status", bkStatusFilter);
     const { data, error } = await query;
@@ -5798,34 +5792,97 @@ export default function Home() {
       setBkError(`Gagal memuat Program BK: ${error.message}`);
       setBkRows([]);
     } else {
-      setBkRows((data ?? []).map((row: any) => ({ ...row, studentName: row.students?.nama ?? "Siswa", className: row.classes?.nama ?? "-", guruName: row.profiles?.nama ?? "-" })));
+      setBkRows((data ?? []).map((row: any) => ({
+        ...row,
+        studentName: row.students?.nama ?? "Siswa",
+        className: row.classes?.nama ?? "-",
+        subjectName: row.subjects?.nama ?? "Umum / tanpa mapel",
+        guruName: row.profiles?.nama ?? "-",
+      })));
     }
     setBkLoading(false);
   };
 
+  const getBkSubjectsForClass = (classId: string) => {
+    if (role === "Admin" || role === "Kepala Sekolah") return programSubjects;
+    if (role !== "Guru") return [];
+    const assignedIds = teacherAssignments
+      .filter((item) => item.classId === classId && item.subjectId)
+      .map((item) => item.subjectId);
+    return programSubjects.filter((subject) => assignedIds.includes(subject.id));
+  };
+
+  const isBkWaliKelas = (classId: string) =>
+    role === "Guru" && teacherAssignments.some((item) => item.classId === classId && item.isWaliKelas);
+
+  const canManageBk = role === "Admin" || role === "Guru";
+
   const openNewBk = () => {
+    if (!canManageBk) return;
+    if (!bkClassId) {
+      alert("Pilih kelas terlebih dahulu pada filter kelas.");
+      return;
+    }
     setBkEditingId(null);
-    setBkForm({ studentId: "", classId: bkClassId || "", tanggal: new Date().toISOString().slice(0, 10), jenisProgram: "Pendampingan belajar", ringkasan: "", tindakLanjut: "", status: "dipantau" });
+    setBkForm({
+      studentId: "", classId: bkClassId || "", subjectId: "",
+      tanggal: new Date().toISOString().slice(0, 10),
+      jenisProgram: "Pendampingan belajar", ringkasan: "", tindakLanjut: "", status: "dipantau",
+    });
     setBkFormOpen(true);
   };
 
   const openEditBk = (row: BkRow) => {
+    if (!canManageBk) return;
     setBkEditingId(row.id);
-    setBkForm({ studentId: row.student_id, classId: row.class_id, tanggal: row.tanggal, jenisProgram: row.jenis_program, ringkasan: row.ringkasan, tindakLanjut: row.tindak_lanjut ?? "", status: row.status });
+    setBkForm({
+      studentId: row.student_id, classId: row.class_id, subjectId: row.subject_id ?? "",
+      tanggal: row.tanggal, jenisProgram: row.jenis_program, ringkasan: row.ringkasan,
+      tindakLanjut: row.tindak_lanjut ?? "", status: row.status,
+    });
     setBkFormOpen(true);
   };
 
   const saveBk = async () => {
-    if (!currentUserId || role === "Siswa") return;
-    if (!bkForm.studentId || !bkForm.classId || !bkForm.tanggal || !bkForm.ringkasan.trim()) { alert("Kelas, siswa, tanggal, dan ringkasan wajib diisi."); return; }
+    if (!currentUserId || !canManageBk) return;
+    if (!bkForm.studentId || !bkForm.classId || !bkForm.tanggal || !bkForm.ringkasan.trim()) {
+      alert("Kelas, siswa, tanggal, dan ringkasan wajib diisi."); return;
+    }
+    if (role === "Guru") {
+      const wali = isBkWaliKelas(bkForm.classId);
+      const allowedSubjects = getBkSubjectsForClass(bkForm.classId);
+      if (!wali && !bkForm.subjectId) {
+        alert("Guru mata pelajaran wajib memilih mata pelajaran yang diampu."); return;
+      }
+      if (bkForm.subjectId && !allowedSubjects.some((subject) => subject.id === bkForm.subjectId)) {
+        alert("Mata pelajaran tersebut bukan penugasan Anda di kelas ini."); return;
+      }
+      if (!wali && !allowedSubjects.length) {
+        alert("Anda tidak memiliki penugasan mengajar pada kelas ini."); return;
+      }
+    }
     setBkSaving(true);
-    const payload = { student_id: bkForm.studentId, guru_id: currentUserId, class_id: bkForm.classId, tanggal: bkForm.tanggal, jenis_program: bkForm.jenisProgram.trim(), ringkasan: bkForm.ringkasan.trim(), tindak_lanjut: bkForm.tindakLanjut.trim() || null, status: bkForm.status };
-    const result = bkEditingId ? await supabase.from("program_bk").update(payload).eq("id", bkEditingId) : await supabase.from("program_bk").insert(payload);
+    const originalRecord = bkEditingId ? bkRows.find((row) => row.id === bkEditingId) : null;
+    const payload = {
+      student_id: bkForm.studentId,
+      guru_id: originalRecord?.guru_id ?? currentUserId,
+      class_id: bkForm.classId,
+      subject_id: bkForm.subjectId || null,
+      tanggal: bkForm.tanggal,
+      jenis_program: bkForm.jenisProgram.trim(),
+      ringkasan: bkForm.ringkasan.trim(),
+      tindak_lanjut: bkForm.tindakLanjut.trim() || null,
+      status: bkForm.status,
+    };
+    const result = bkEditingId
+      ? await supabase.from("program_bk").update(payload).eq("id", bkEditingId)
+      : await supabase.from("program_bk").insert(payload);
     if (result.error) { alert(`Program BK gagal disimpan: ${result.error.message}`); setBkSaving(false); return; }
     setBkFormOpen(false); setBkEditingId(null); setBkSaving(false); await loadBkData();
   };
 
   const deleteBk = async (id: string) => {
+    if (!canManageBk) return;
     if (!window.confirm("Hapus program BK ini?")) return;
     const { error } = await supabase.from("program_bk").delete().eq("id", id);
     if (error) { alert(`Program BK gagal dihapus: ${error.message}`); return; }
@@ -5957,8 +6014,9 @@ export default function Home() {
     if (action === "bk") {
       await openMenu("Program BK");
       setBkClassId(lesson.classId);
+      void loadBkData(lesson.classId);
       setBkEditingId(null);
-      setBkForm({ studentId: "", classId: lesson.classId, tanggal: today, jenisProgram: "Pendampingan belajar", ringkasan: "", tindakLanjut: "", status: "dipantau" });
+      setBkForm({ studentId: "", classId: lesson.classId, subjectId: lesson.subjectId, tanggal: today, jenisProgram: "Pendampingan belajar", ringkasan: "", tindakLanjut: "", status: "dipantau" });
       setBkFormOpen(true);
     }
   };
@@ -7180,12 +7238,201 @@ if (!loggedIn) {
           )}
 
           {activeMenu === "Program BK" && (
-            <Section title="Program BK" subtitle={role === "Siswa" ? "Program pendampingan yang tercatat untuk Anda" : "Catatan program pendampingan siswa"}>
-              <div className="mb-5 rounded-2xl border border-sky-100 bg-sky-50/60 p-4"><div className="flex flex-wrap items-end gap-3">{role !== "Siswa" && <><div className="min-w-[200px] flex-1"><label className="mb-1 block text-xs font-bold text-slate-600">Kelas</label><select value={bkClassId} onChange={(e) => { setBkClassId(e.target.value); setBkForm((v) => ({ ...v, classId: e.target.value, studentId: "" })); void loadBkData(); }} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"><option value="">Semua kelas</option>{programClasses.map((item) => <option key={item.id} value={item.id}>{item.nama}</option>)}</select></div><button type="button" onClick={openNewBk} className="rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-sky-700">＋ Tambah Program</button>
-                  <button type="button" onClick={() => printSchoolLearningDocument("Laporan Bimbingan Konseling", ["No", "Siswa", "Tanggal", "Bentuk", "Jenis", "Masalah", "Tindak Lanjut"], bkRows.map((row, i) => [i + 1, row.studentName, row.tanggal, "Individu", row.jenis_program, row.ringkasan, row.tindak_lanjut || "-"]))} className="rounded-xl border border-sky-300 bg-white px-4 py-2.5 text-sm font-bold text-sky-700">🖨️ Cetak / Simpan PDF</button></>}{role === "Siswa" && <div><p className="text-sm font-bold text-sky-900">Program pendampingan</p><p className="text-xs text-sky-800">Data yang ditampilkan hanya milik akun siswa ini.</p></div>}</div></div>
+            <Section
+              title="Program BK"
+              subtitle={
+                role === "Siswa"
+                  ? "Program pendampingan yang tercatat untuk Anda"
+                  : role === "Kepala Sekolah"
+                    ? "Pemantauan seluruh catatan program pendampingan siswa"
+                    : "Catatan program pendampingan siswa"
+              }
+            >
+              <div className="mb-5 rounded-2xl border border-sky-100 bg-sky-50/60 p-4">
+                <div className="flex flex-wrap items-end gap-3">
+                  {role !== "Siswa" && (
+                    <>
+                      <div className="min-w-[200px] flex-1">
+                        <label className="mb-1 block text-xs font-bold text-slate-600">Filter Kelas</label>
+                        <select
+                          value={bkClassId}
+                          onChange={(e) => {
+                            const nextClassId = e.target.value;
+                            setBkClassId(nextClassId);
+                            setBkForm((v) => ({ ...v, classId: nextClassId, studentId: "", subjectId: "" }));
+                            setBkFormOpen(false);
+                            void loadBkData(nextClassId);
+                          }}
+                          className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"
+                        >
+                          <option value="">Semua kelas</option>
+                          {programClasses.map((item) => (
+                            <option key={item.id} value={item.id}>{item.nama}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {canManageBk && (
+                        <button
+                          type="button"
+                          onClick={openNewBk}
+                          className="rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-sky-700"
+                        >
+                          ＋ Tambah Program
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => printSchoolLearningDocument(
+                          "Laporan Bimbingan Konseling",
+                          ["No", "Siswa", "Tanggal", "Bentuk", "Jenis", "Mata Pelajaran", "Ringkasan", "Tindak Lanjut"],
+                          bkRows.map((row, i) => [i + 1, row.studentName, row.tanggal, "Individu", row.jenis_program, row.subjectName, row.ringkasan, row.tindak_lanjut || "-"])
+                        )}
+                        className="rounded-xl border border-sky-300 bg-white px-4 py-2.5 text-sm font-bold text-sky-700"
+                      >
+                        🖨️ Cetak / Simpan PDF
+                      </button>
+                    </>
+                  )}
+                  {role === "Siswa" && (
+                    <div>
+                      <p className="text-sm font-bold text-sky-900">Program pendampingan</p>
+                      <p className="text-xs text-sky-800">Data yang ditampilkan hanya milik akun siswa ini.</p>
+                    </div>
+                  )}
+                </div>
+                {role === "Kepala Sekolah" && (
+                  <p className="mt-3 text-xs leading-5 text-sky-800">
+                    Mode pemantauan: Kepala Sekolah dapat melihat dan mencetak laporan, tanpa menambah, mengubah, atau menghapus catatan.
+                  </p>
+                )}
+              </div>
+
               {bkError && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{bkError}</div>}
-              {bkFormOpen && role !== "Siswa" && <div className="mb-6 rounded-2xl border border-sky-200 bg-sky-50/40 p-5"><div className="mb-4 flex items-center justify-between"><h3 className="font-bold">{bkEditingId ? "Edit Program BK" : "Tambah Program BK"}</h3><button type="button" onClick={() => setBkFormOpen(false)} className="rounded-xl px-3 py-2 text-sm text-slate-500 hover:bg-white">Tutup</button></div><div className="grid gap-4 md:grid-cols-2"><div><label className="mb-1 block text-xs font-bold">Kelas</label><select value={bkForm.classId} onChange={(e) => setBkForm((v) => ({ ...v, classId: e.target.value, studentId: "" }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"><option value="">Pilih kelas</option>{programClasses.map((item) => <option key={item.id} value={item.id}>{item.nama}</option>)}</select></div><div><label className="mb-1 block text-xs font-bold">Siswa</label><select value={bkForm.studentId} onChange={(e) => setBkForm((v) => ({ ...v, studentId: e.target.value }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"><option value="">Pilih siswa</option>{programStudents.filter((item) => !bkForm.classId || item.class_id === bkForm.classId).map((item) => <option key={item.id} value={item.id}>{item.nama} {item.nis ? `(${item.nis})` : ""}</option>)}</select></div><div><label className="mb-1 block text-xs font-bold">Tanggal</label><input type="date" value={bkForm.tanggal} onChange={(e) => setBkForm((v) => ({ ...v, tanggal: e.target.value }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm" /></div><div><label className="mb-1 block text-xs font-bold">Jenis Program</label><select value={bkForm.jenisProgram} onChange={(e) => setBkForm((v) => ({ ...v, jenisProgram: e.target.value }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"><option>Pendampingan belajar</option><option>Pendampingan perilaku</option><option>Motivasi belajar</option><option>Sosial dan pertemanan</option><option>Lainnya</option></select></div><div className="md:col-span-2"><label className="mb-1 block text-xs font-bold">Ringkasan</label><textarea rows={4} value={bkForm.ringkasan} onChange={(e) => setBkForm((v) => ({ ...v, ringkasan: e.target.value }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm" placeholder="Ringkasan pendampingan yang aman ditampilkan pada akun siswa." /></div><div><label className="mb-1 block text-xs font-bold">Tindak Lanjut</label><textarea rows={3} value={bkForm.tindakLanjut} onChange={(e) => setBkForm((v) => ({ ...v, tindakLanjut: e.target.value }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm" /></div><div><label className="mb-1 block text-xs font-bold">Status</label><select value={bkForm.status} onChange={(e) => setBkForm((v) => ({ ...v, status: e.target.value as "dipantau" | "selesai" }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"><option value="dipantau">Dipantau</option><option value="selesai">Selesai</option></select></div></div><div className="mt-4 flex justify-end gap-2"><button type="button" onClick={() => setBkFormOpen(false)} className="rounded-xl border bg-white px-4 py-2.5 text-sm font-bold">Batal</button><button type="button" onClick={saveBk} disabled={bkSaving} className="rounded-xl bg-sky-600 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">{bkSaving ? "Menyimpan..." : "Simpan"}</button></div></div>}
-              <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">{bkLoading ? <div className="p-8 text-center text-sm text-slate-500">Memuat data...</div> : bkRows.length === 0 ? <div className="p-8 text-center text-sm text-slate-500">Belum ada program BK.</div> : <table className="w-full min-w-[900px] text-sm"><thead className="bg-slate-50"><tr><th className="px-3 py-3 text-left">Tanggal</th><th className="px-3 py-3 text-left">Siswa</th><th className="px-3 py-3 text-left">Kelas</th><th className="px-3 py-3 text-left">Program</th><th className="px-3 py-3 text-left">Ringkasan</th><th className="px-3 py-3 text-left">Tindak Lanjut</th><th className="px-3 py-3 text-left">Status</th>{role !== "Siswa" && <th className="px-3 py-3 text-center">Aksi</th>}</tr></thead><tbody>{bkRows.map((row) => <tr key={row.id} className="border-t align-top"><td className="px-3 py-3 whitespace-nowrap">{row.tanggal}</td><td className="px-3 py-3 font-semibold">{row.studentName}</td><td className="px-3 py-3">{row.className}</td><td className="px-3 py-3">{row.jenis_program}</td><td className="px-3 py-3 whitespace-pre-wrap">{row.ringkasan}</td><td className="px-3 py-3 whitespace-pre-wrap">{row.tindak_lanjut || "-"}</td><td className="px-3 py-3">{row.status === "selesai" ? "Selesai" : "Dipantau"}</td>{role !== "Siswa" && <td className="px-3 py-3"><div className="flex justify-center gap-2"><button type="button" onClick={() => openEditBk(row)} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">Edit</button><button type="button" onClick={() => deleteBk(row.id)} className="rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-bold text-red-600">Hapus</button></div></td>}</tr>)}</tbody></table>}</div>
+
+              {bkFormOpen && canManageBk && (
+                <div className="mb-6 rounded-2xl border border-sky-200 bg-sky-50/40 p-5">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="font-bold">{bkEditingId ? "Edit Program BK" : "Tambah Program BK"}</h3>
+                    <button type="button" onClick={() => setBkFormOpen(false)} className="rounded-xl px-3 py-2 text-sm text-slate-500 hover:bg-white">Tutup</button>
+                  </div>
+                  <div className="mb-4 rounded-xl border border-sky-100 bg-white px-3 py-2 text-sm">
+                    <span className="text-slate-500">Kelas terpilih: </span>
+                    <strong>{programClasses.find((item) => item.id === bkForm.classId)?.nama ?? "Kelas belum dipilih"}</strong>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-bold">Siswa</label>
+                      <select
+                        value={bkForm.studentId}
+                        onChange={(e) => setBkForm((v) => ({ ...v, studentId: e.target.value }))}
+                        className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"
+                      >
+                        <option value="">Pilih siswa</option>
+                        {programStudents.filter((item) => item.class_id === bkForm.classId).map((item) => (
+                          <option key={item.id} value={item.id}>{item.nama} {item.nis ? `(${item.nis})` : ""}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-bold">Mata Pelajaran (opsional untuk Wali Kelas)</label>
+                      <select
+                        value={bkForm.subjectId}
+                        onChange={(e) => setBkForm((v) => ({ ...v, subjectId: e.target.value }))}
+                        className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"
+                      >
+                        <option value="">Umum / tanpa mata pelajaran</option>
+                        {getBkSubjectsForClass(bkForm.classId).map((item) => (
+                          <option key={item.id} value={item.id}>{item.nama}</option>
+                        ))}
+                      </select>
+                      {role === "Guru" && !isBkWaliKelas(bkForm.classId) && (
+                        <p className="mt-1 text-[11px] text-slate-500">Guru mata pelajaran wajib memilih mapel yang diampu pada kelas ini.</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-bold">Tanggal</label>
+                      <input type="date" value={bkForm.tanggal} onChange={(e) => setBkForm((v) => ({ ...v, tanggal: e.target.value }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-bold">Jenis Program</label>
+                      <select value={bkForm.jenisProgram} onChange={(e) => setBkForm((v) => ({ ...v, jenisProgram: e.target.value }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm">
+                        <option>Pendampingan belajar</option>
+                        <option>Pendampingan perilaku</option>
+                        <option>Motivasi belajar</option>
+                        <option>Sosial dan pertemanan</option>
+                        <option>Lainnya</option>
+                      </select>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="mb-1 block text-xs font-bold">Ringkasan</label>
+                      <textarea rows={4} value={bkForm.ringkasan} onChange={(e) => setBkForm((v) => ({ ...v, ringkasan: e.target.value }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm" placeholder="Tuliskan fakta pendampingan secara objektif, singkat, dan tidak memberi label negatif kepada siswa." />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-bold">Tindak Lanjut</label>
+                      <textarea rows={3} value={bkForm.tindakLanjut} onChange={(e) => setBkForm((v) => ({ ...v, tindakLanjut: e.target.value }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-bold">Status</label>
+                      <select value={bkForm.status} onChange={(e) => setBkForm((v) => ({ ...v, status: e.target.value as "dipantau" | "selesai" }))} className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm">
+                        <option value="dipantau">Dipantau</option>
+                        <option value="selesai">Selesai</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button type="button" onClick={() => setBkFormOpen(false)} className="rounded-xl border bg-white px-4 py-2.5 text-sm font-bold">Batal</button>
+                    <button type="button" onClick={saveBk} disabled={bkSaving} className="rounded-xl bg-sky-600 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">{bkSaving ? "Menyimpan..." : "Simpan"}</button>
+                  </div>
+                </div>
+              )}
+
+              <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+                {bkLoading ? (
+                  <div className="p-8 text-center text-sm text-slate-500">Memuat data...</div>
+                ) : bkRows.length === 0 ? (
+                  <div className="p-8 text-center text-sm text-slate-500">Belum ada program BK.</div>
+                ) : (
+                  <table className="w-full min-w-[1050px] text-sm">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-3 py-3 text-left">Tanggal</th>
+                        <th className="px-3 py-3 text-left">Siswa</th>
+                        <th className="px-3 py-3 text-left">Kelas</th>
+                        <th className="px-3 py-3 text-left">Program</th>
+                        <th className="px-3 py-3 text-left">Mata Pelajaran</th>
+                        <th className="px-3 py-3 text-left">Ringkasan</th>
+                        <th className="px-3 py-3 text-left">Tindak Lanjut</th>
+                        <th className="px-3 py-3 text-left">Status</th>
+                        {canManageBk && <th className="px-3 py-3 text-center">Aksi</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bkRows.map((row) => (
+                        <tr key={row.id} className="border-t align-top">
+                          <td className="px-3 py-3 whitespace-nowrap">{row.tanggal}</td>
+                          <td className="px-3 py-3 font-semibold">{row.studentName}</td>
+                          <td className="px-3 py-3">{row.className}</td>
+                          <td className="px-3 py-3">{row.jenis_program}</td>
+                          <td className="px-3 py-3">{row.subjectName}</td>
+                          <td className="px-3 py-3 whitespace-pre-wrap">{row.ringkasan}</td>
+                          <td className="px-3 py-3 whitespace-pre-wrap">{row.tindak_lanjut || "-"}</td>
+                          <td className="px-3 py-3">{row.status === "selesai" ? "Selesai" : "Dipantau"}</td>
+                          {canManageBk && (
+                            <td className="px-3 py-3">
+                              {(role === "Admin" || row.guru_id === currentUserId) && (
+                              <div className="flex justify-center gap-2">
+                                <button type="button" onClick={() => openEditBk(row)} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">Edit</button>
+                                <button type="button" onClick={() => deleteBk(row.id)} className="rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-bold text-red-600">Hapus</button>
+                              </div>
+                              )}
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
             </Section>
           )}
 
@@ -8060,7 +8307,7 @@ if (!loggedIn) {
                           <>
                           <div className="mb-4 rounded-xl border border-violet-100 bg-violet-50 p-4">
                             <p className="font-bold text-violet-900">Persentase Kehadiran Pegawai — Bulan Berjalan</p>
-                            <p className="mt-1 text-sm text-violet-800">Daftar mencakup semua akun guru, kepala sekolah, dan admin. Jumlah hari kerja menampilkan total hari wajib selama satu bulan penuh sesuai jadwal masing-masing guru (pegawai Admin/Kepala Sekolah mengikuti Senin–Jumat). Persentase dihitung dari total hari wajib satu bulan; tanggal mendatang belum dihitung sebagai Alfa.</p>
+                            <p className="mt-1 text-sm text-violet-800">Daftar mencakup semua akun guru, kepala sekolah, dan admin. Jumlah hari kerja menampilkan total hari wajib selama satu bulan penuh sesuai jadwal masing-masing guru (pegawai Admin/Kepala Sekolah mengikuti Senin–Jumat). Persentase dihitung dari total hari wajib satu bulan; status Alfa hanya berasal dari catatan Alfa, sedangkan tanggal wajib tanpa catatan ditampilkan sebagai Belum Absen.</p>
                           </div>
                           {role === "Admin" && (
                             <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
@@ -8087,7 +8334,7 @@ if (!loggedIn) {
                           )}
                           <div className="overflow-x-auto">
                             <table className="w-full min-w-[760px] border-collapse text-left text-sm">
-                              <thead><tr className="border-b bg-slate-50 text-xs uppercase text-slate-500"><th className="p-3">No.</th><th className="p-3">Nama Pegawai</th><th className="p-3">Jabatan</th><th className="p-3">Hadir</th><th className="p-3">Izin</th><th className="p-3">Sakit</th><th className="p-3">Alfa</th><th className="p-3">Persentase Kehadiran</th></tr></thead>
+                              <thead><tr className="border-b bg-slate-50 text-xs uppercase text-slate-500"><th className="p-3">No.</th><th className="p-3">Nama Pegawai</th><th className="p-3">Jabatan</th><th className="p-3">Hadir</th><th className="p-3">Izin</th><th className="p-3">Sakit</th><th className="p-3">Alfa</th><th className="p-3">Belum Absen</th><th className="p-3">Persentase Kehadiran</th></tr></thead>
                               <tbody>
                                 {teacherAttendanceRows.map((row, index) => (
                                   <tr key={row.guru_id} className="border-b border-slate-100">
@@ -8095,7 +8342,7 @@ if (!loggedIn) {
                                     <td className="p-3 font-semibold text-gray-900">{row.nama_guru}</td>
                                     <td className="p-3">{row.role_label}</td>
                                     <td className="p-3">{row.attendedWorkdays}/{row.workdaysElapsed} hari kerja</td>
-                                    <td className="p-3">{row.izinDays}</td><td className="p-3">{row.sakitDays}</td><td className="p-3">{row.alfaDays}</td>
+                                    <td className="p-3">{row.izinDays}</td><td className="p-3">{row.sakitDays}</td><td className="p-3">{row.alfaDays}</td><td className="p-3">{row.unrecordedDays}</td>
                                     <td className="p-3"><span className="font-bold text-violet-700">{row.attendancePercentage}%</span><div className="mt-2 h-2 w-28 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-violet-600" style={{ width: `${row.attendancePercentage}%` }} /></div></td>
                                   </tr>
                                 ))}
