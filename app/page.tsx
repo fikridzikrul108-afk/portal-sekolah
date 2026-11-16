@@ -8240,20 +8240,44 @@ if (!loggedIn) {
                       {gradeSaved && <p className="text-sm font-semibold text-emerald-700">✓ Penilaian Tahfidz berhasil disimpan.</p>}
                     </div>
                   ) : !gradeLoading && gradeStudents.length > 0 ? (
-                    <div className="space-y-4">
-                      <details className="overflow-hidden rounded-2xl border border-emerald-200 bg-white">
+                    <div className="w-full min-w-0 max-w-full space-y-4">
+                      <details className="w-full min-w-0 max-w-full overflow-hidden rounded-2xl border border-emerald-200 bg-white">
                         <summary className="cursor-pointer list-none px-5 py-4 font-bold text-gray-900 hover:bg-emerald-50">Penilaian (TP1–TP10, Non-Tes, STS, SAS)<span className="float-right text-sm font-normal text-gray-500">Klik untuk buka/tutup</span></summary>
-                        <div className="space-y-4 border-t border-emerald-100 p-4">
-                      <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                        <div className="min-w-0 w-full max-w-full space-y-4 border-t border-emerald-100 p-3 sm:p-4">
+                      <div className="min-w-0 rounded-2xl border border-emerald-100 bg-emerald-50 p-3 sm:p-4">
 
                         <h3 className="font-bold text-gray-900">Petunjuk Pengisian Nilai</h3>
                         <p className="mt-1 text-sm text-gray-600">Isi nilai pada kolom TP1 sampai TP10 sesuai hasil pembelajaran. Gunakan kolom Non-Tes untuk penilaian praktik, proyek, atau kinerja. Lengkapi nilai STS dan SAS sesuai hasil penilaian.</p>
                       </div>
-                      <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm">
-                        <table className="w-full min-w-[1500px] border-collapse text-xs">
+                      <div
+                        role="region"
+                        aria-label="Tabel input nilai, geser secara horizontal untuk melihat seluruh kolom"
+                        tabIndex={0}
+                        onWheel={(event) => {
+                          // Pada desktop, roda mouse biasa juga dapat menggeser tabel ke samping.
+                          if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+                            event.currentTarget.scrollLeft += event.deltaY;
+                          }
+                        }}
+                        className="block w-full min-w-0 max-w-full rounded-xl border border-gray-200 bg-white shadow-sm"
+                        style={{
+                          width: "100%",
+                          maxWidth: "100%",
+                          overflowX: "scroll",
+                          overflowY: "hidden",
+                          overscrollBehaviorX: "contain",
+                          WebkitOverflowScrolling: "touch",
+                          touchAction: "pan-x pan-y",
+                        }}
+                      >
+                        <div className="sticky left-0 z-40 flex w-full min-w-0 items-center justify-between gap-3 border-b border-emerald-100 bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-800">
+                          <span>Geser tabel ke kiri/kanan untuk melihat TP1–TP10, Non-Tes, STS, SAS, dan nilai akhir.</span>
+                          <span className="shrink-0 whitespace-nowrap">← Geser →</span>
+                        </div>
+                        <table className="w-max min-w-[1750px] border-collapse text-xs">
                           <thead className="bg-emerald-700 text-white"><tr>
-                            <th className="sticky left-0 z-20 bg-emerald-700 px-3 py-3 text-left">No</th>
-                            <th className="sticky left-10 z-20 min-w-[210px] bg-emerald-700 px-3 py-3 text-left">Nama Siswa</th>
+                            <th className="sticky left-0 z-20 w-10 min-w-10 bg-emerald-700 px-2 py-3 text-left">No</th>
+                            <th className="sticky left-10 z-20 w-[140px] min-w-[140px] bg-emerald-700 px-2 py-3 text-left sm:w-[210px] sm:min-w-[210px] sm:px-3">Nama Siswa</th>
                             {Array.from({length:10},(_,i)=><th key={i} className="min-w-[76px] px-2 py-3">TP{i+1}</th>)}
                             <th className="min-w-[90px] px-2 py-3">Non-Tes</th><th className="min-w-[80px] px-2 py-3">STS</th><th className="min-w-[80px] px-2 py-3">SAS</th>
                             <th className="min-w-[85px] px-2 py-3">Jumlah</th><th className="min-w-[85px] px-2 py-3">Rata-rata</th><th className="min-w-[75px] px-2 py-3">Peringkat</th>
@@ -8265,7 +8289,7 @@ if (!loggedIn) {
                             const total=values.reduce((a,b)=>a+b,0); const average=values.length?total/values.length:null;
                             const rank=gradeStudents.map(st=>{const d=gradeDrafts[st.id]??emptyGradeDraft(st.id);const vals=[...Array.from({length:10},(_,i)=>d.sumatif[i]?.nilai??""),d.nilaiNonTes,d.nilaiUtsPts,d.nilaiSas].map(v=>v===""?null:Number(v)).filter((v):v is number=>v!==null&&Number.isFinite(v));return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:-1;}).filter(v=>v>=0).filter(v=>average!==null&&v>average).length+1;
                             return <tr key={student.id} className="border-t hover:bg-emerald-50/40">
-                              <td className="sticky left-0 z-10 bg-white px-3 py-2">{index+1}</td><td className="sticky left-10 z-10 bg-white px-3 py-2"><div className="font-semibold text-gray-800">{student.name}</div><div className="text-[10px] text-gray-400">NIS {student.nis}</div></td>
+                              <td className="sticky left-0 z-10 w-10 min-w-10 bg-white px-2 py-2">{index+1}</td><td className="sticky left-10 z-10 w-[140px] min-w-[140px] bg-white px-2 py-2 sm:w-[210px] sm:min-w-[210px] sm:px-3"><div className="break-words font-semibold text-gray-800">{student.name}</div><div className="text-[10px] text-gray-400">NIS {student.nis}</div></td>
                               {Array.from({length:10},(_,i)=>{const item=draft.sumatif[i]??{materi:`TP ${i+1}`,tujuanPembelajaran:`TP ${i+1}`,nilai:""};return <td key={i} className="px-1.5 py-2"><input aria-label={`TP ${i+1} ${student.name}`} type="number" min="0" max="100" value={item.nilai} disabled={!canEditGrades} onChange={e=>{const next=[...draft.sumatif];while(next.length<=i)next.push({materi:`TP ${next.length+1}`,tujuanPembelajaran:`TP ${next.length+1}`,nilai:""});next[i]={...next[i],materi:next[i].materi||`TP ${i+1}`,tujuanPembelajaran:next[i].tujuanPembelajaran||`TP ${i+1}`,nilai:e.target.value};updateGradeDraft(student.id,{sumatif:next});}} className="w-[68px] rounded-lg border px-2 py-2 text-center outline-none focus:border-emerald-500 disabled:bg-gray-50" placeholder="-" /></td>})}
                               {[['nilaiNonTes','nilaiNonTes'],['nilaiUtsPts','nilaiUtsPts'],['nilaiSas','nilaiSas']].map(([key])=><td key={key} className="px-1.5 py-2"><input aria-label={`${key} ${student.name}`} type="number" min="0" max="100" value={draft[key as 'nilaiNonTes'|'nilaiUtsPts'|'nilaiSas']} disabled={!canEditGrades} onChange={e=>updateGradeDraft(student.id,{[key]:e.target.value})} className="w-[72px] rounded-lg border px-2 py-2 text-center outline-none focus:border-emerald-500 disabled:bg-gray-50" placeholder="-" /></td>)}
                               <td className="px-2 py-2 text-center font-semibold">{values.length?total:"-"}</td><td className="px-2 py-2 text-center font-semibold text-emerald-700">{average===null?"-":average.toFixed(1)}</td><td className="px-2 py-2 text-center">{average===null?"-":rank}</td>
