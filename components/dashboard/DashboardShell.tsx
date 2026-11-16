@@ -162,7 +162,7 @@ export default function DashboardShell({
     }
   };
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 antialiased dark:bg-slate-950">
+    <div className="min-h-screen bg-slate-100 px-2 py-2 text-slate-900 antialiased dark:bg-slate-950 sm:px-0 sm:py-0 dark:sm:bg-slate-950">
       {/* ===== Sidebar desktop ===== */}
       <aside className="fixed left-0 top-0 z-30 hidden h-screen w-[272px] flex-col border-r border-white/5 bg-slate-900 shadow-xl shadow-slate-900/20 lg:flex">
         <div className="flex h-[72px] shrink-0 items-center border-b border-white/10 px-6">
