@@ -606,7 +606,7 @@ const SCHOOL_REPORT_SUBJECT_NAMES = new Set([
   "Seni",
 ]);
 const normalizeReportSubjectName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
-const isMadinReportSubject = (name: string) => MADIN_SUBJECT_NAMES.has(name) || normalizeReportSubjectName(name) === "btq";
+const isMadinReportSubject = (name: string) => MADIN_SUBJECT_NAMES.has(name) || ["btq", "tahfidz", "tahfiz"].includes(normalizeReportSubjectName(name));
 const isPencakSilatSubject = (name: string) => normalizeReportSubjectName(name) === "pencaksilat";
 const isSchoolReportSubject = (name: string) => SCHOOL_REPORT_SUBJECT_NAMES.has(name);
 
@@ -1245,12 +1245,20 @@ export default function Home() {
   const [isWaliKelas, setIsWaliKelas] = useState(false);
   const [isGuruPiket, setIsGuruPiket] = useState(false);
   const canEditGrades = role === "Admin" || role === "Guru";
+  const isAssignedTahfidzTeacher = teacherAssignments.some((assignment) =>
+    normalizeReportSubjectName(assignment.subjectName) === "tahfidz" ||
+    normalizeReportSubjectName(assignment.subjectName) === "tahfiz" ||
+    String(assignment.subjectCode ?? "").toUpperCase() === "TAHFIDZ"
+  );
+  const canAccessTahfidz = role === "Admin" || (role === "Guru" && (isGuruPiket || isAssignedTahfidzTeacher));
+  const canEditTahfidz = canAccessTahfidz && (role === "Admin" || role === "Guru");
   const canViewReport = role === "Admin" || role === "Orang Tua" || isWaliKelas;
   const canEditReport = role === "Admin" || isWaliKelas;
   const isParentReadOnly = role === "Orang Tua";
   const [gradeTab, setGradeTab] = useState<"input" | "raport">("input");
   const [reportType, setReportType] = useState<"school" | "madin">("school");
   const [gradeClasses, setGradeClasses] = useState<GradeClass[]>([]);
+  const [tahfidzClassOptions, setTahfidzClassOptions] = useState<GradeClass[]>([]);
   const [gradeSubjects, setGradeSubjects] = useState<GradeSubject[]>([]);
   const [gradeStudents, setGradeStudents] = useState<GradeStudent[]>([]);
   const [selectedGradeClassId, setSelectedGradeClassId] = useState("");
@@ -1262,6 +1270,29 @@ export default function Home() {
   const [tahfidzSetoranForm, setTahfidzSetoranForm] = useState({ tanggal: new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" }), namaSurat: "", status: "Tuntas" as "Tuntas" | "Ulang", nilai: "", predikat: "", catatan: "" });
   const [tahfidzSetoranSaving, setTahfidzSetoranSaving] = useState(false);
   const [tahfidzSetoranError, setTahfidzSetoranError] = useState("");
+  const [programSchoolStudents, setProgramSchoolStudents] = useState<GradeStudent[]>([]);
+  const [programSchoolStudentsLoading, setProgramSchoolStudentsLoading] = useState(false);
+  const [programSchoolStudentsError, setProgramSchoolStudentsError] = useState("");
+  const [selectedBtqStudentId, setSelectedBtqStudentId] = useState("");
+  const [btqGroups, setBtqGroups] = useState<any[]>([]);
+  const [selectedBtqGroupId, setSelectedBtqGroupId] = useState("");
+  const [btqGroupStudents, setBtqGroupStudents] = useState<any[]>([]);
+  const [btqAvailableStudents, setBtqAvailableStudents] = useState<any[]>([]);
+  const [btqSelectedMemberIds, setBtqSelectedMemberIds] = useState<string[]>([]);
+  const [btqGroupTeacherNames, setBtqGroupTeacherNames] = useState<string[]>([]);
+  const [btqGroupLoading, setBtqGroupLoading] = useState(false);
+  const [btqGroupSaving, setBtqGroupSaving] = useState(false);
+  const [btqAssessments, setBtqAssessments] = useState<any[]>([]);
+  const [btqLoading, setBtqLoading] = useState(false);
+  const [btqSaving, setBtqSaving] = useState(false);
+  const [btqError, setBtqError] = useState("");
+  const [btqForm, setBtqForm] = useState({
+    tanggal: new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" }),
+    makhraj: "Baik",
+    panjangPendek: "Baik",
+    kelancaran: "Cukup lancar",
+    catatan: "",
+  });
   const [gradeLoading, setGradeLoading] = useState(false);
   const [gradeSaving, setGradeSaving] = useState(false);
   const [gradeSaved, setGradeSaved] = useState(false);
@@ -2026,6 +2057,7 @@ export default function Home() {
       }
     }
 
+    // Tahfidz tetap tersedia untuk sinkronisasi nilai Program Sekolah; disembunyikan hanya dari dropdown Nilai.
     setGradeClasses(nextClasses);
     setGradeSubjects(nextSubjects);
 
@@ -2261,6 +2293,7 @@ export default function Home() {
   };
 
   const saveTahfidzSetoran = async () => {
+    if (!canEditTahfidz) { setTahfidzSetoranError("Akun ini tidak memiliki akses untuk mengisi Tahfidz."); return; }
     if (!selectedTahfidzStudentId || !currentUserId) { alert("Pilih siswa terlebih dahulu."); return; }
     if (!tahfidzSetoranForm.tanggal || !tahfidzSetoranForm.namaSurat.trim()) { alert("Tanggal dan nama surat wajib diisi."); return; }
     const nilai = tahfidzSetoranForm.nilai === "" ? null : Number(tahfidzSetoranForm.nilai);
@@ -2288,10 +2321,391 @@ export default function Home() {
   };
 
   const deleteTahfidzSetoran = async (id: string) => {
-    if (!canEditGrades || !window.confirm("Hapus catatan setoran hafalan ini?")) return;
+    if (!canEditTahfidz || !window.confirm("Hapus catatan setoran hafalan ini?")) return;
     const { error } = await supabase.from("tahfidz_setoran").delete().eq("id", id);
     if (error) { setTahfidzSetoranError(`Setoran gagal dihapus: ${error.message}`); return; }
     await loadTahfidzSetoran(selectedTahfidzStudentId);
+  };
+
+  // BTQ menggunakan kelompok tetap dari Admin, terpisah dari kelas reguler siswa.
+  const loadBtqGroups = async (preferredGroupId = selectedBtqGroupId) => {
+    setBtqGroupLoading(true);
+    setBtqError("");
+    let groupIds: string[] | null = null;
+
+    if (role === "Guru") {
+      const { data: assignments, error: assignmentError } = await supabase
+        .from("btq_group_teachers")
+        .select("group_id")
+        .eq("teacher_id", currentUserId);
+      if (assignmentError) {
+        setBtqError(`Gagal memuat penugasan kelompok BTQ: ${assignmentError.message}`);
+        setBtqGroupLoading(false);
+        return;
+      }
+      groupIds = (assignments ?? []).map((row) => row.group_id).filter(Boolean);
+      if (!groupIds.length) {
+        setBtqGroups([]);
+        setSelectedBtqGroupId("");
+        setBtqGroupStudents([]);
+        setBtqGroupLoading(false);
+        return;
+      }
+    }
+
+    let groupsQuery = supabase.from("btq_groups").select("id, jenjang, kode, nama").order("jenjang").order("kode");
+    if (groupIds) groupsQuery = groupsQuery.in("id", groupIds);
+    const { data: groups, error: groupsError } = await groupsQuery;
+    if (groupsError) {
+      setBtqError(`Gagal memuat kelompok BTQ: ${groupsError.message}`);
+      setBtqGroupLoading(false);
+      return;
+    }
+
+    setBtqGroups(groups ?? []);
+    const nextGroupId = (groups ?? []).some((group) => group.id === preferredGroupId)
+      ? preferredGroupId
+      : (groups ?? [])[0]?.id ?? "";
+    setSelectedBtqGroupId(nextGroupId);
+    if (role === "Admin") {
+      const { data: students, error: studentsError } = await supabase
+        .from("students")
+        .select("id, nama, nis, class_id")
+        .eq("status", "aktif")
+        .order("nama");
+      if (studentsError) setBtqError(`Gagal memuat daftar siswa: ${studentsError.message}`);
+      else setBtqAvailableStudents(students ?? []);
+    }
+    setBtqGroupLoading(false);
+    if (nextGroupId) await loadBtqGroupMembers(nextGroupId);
+  };
+
+  const loadBtqGroupMembers = async (groupId: string) => {
+    setSelectedBtqGroupId(groupId);
+    setSelectedBtqStudentId("");
+    setBtqAssessments([]);
+    setBtqGroupStudents([]);
+    setBtqSelectedMemberIds([]);
+    setBtqGroupTeacherNames([]);
+    if (!groupId) return;
+
+    setBtqGroupLoading(true);
+    const [{ data: members, error: membersError }, { data: teacherRows, error: teachersError }] = await Promise.all([
+      supabase.from("btq_group_members").select("student_id").eq("group_id", groupId),
+      supabase.from("btq_group_teachers").select("teacher_id").eq("group_id", groupId),
+    ]);
+    if (membersError) {
+      setBtqError(`Gagal memuat anggota kelompok: ${membersError.message}`);
+      setBtqGroupLoading(false);
+      return;
+    }
+    if (teachersError) {
+      setBtqError(`Gagal memuat pembimbing kelompok: ${teachersError.message}`);
+      setBtqGroupLoading(false);
+      return;
+    }
+
+    const memberIds = (members ?? []).map((row) => row.student_id).filter(Boolean);
+    setBtqSelectedMemberIds(memberIds);
+    if (memberIds.length) {
+      const { data: students, error: studentsError } = await supabase
+        .from("students")
+        .select("id, nama, nis, class_id")
+        .in("id", memberIds)
+        .order("nama");
+      if (studentsError) {
+        setBtqError(`Gagal memuat siswa kelompok: ${studentsError.message}`);
+      } else {
+        const classIds = Array.from(new Set((students ?? []).map((student) => student.class_id).filter(Boolean)));
+        const { data: classesForBtq } = classIds.length
+          ? await supabase.from("classes").select("id, tahun_ajaran").in("id", classIds)
+          : { data: [] as any[] };
+        const yearByClass = new Map((classesForBtq ?? []).map((item) => [item.id, item.tahun_ajaran]));
+        setBtqGroupStudents((students ?? []).map((student) => ({
+          ...student,
+          tahun_ajaran: yearByClass.get(student.class_id) ?? "2026/2027",
+        })));
+      }
+    }
+    const teacherIds = (teacherRows ?? []).map((row) => row.teacher_id).filter(Boolean);
+    if (role === "Admin" && teacherIds.length) {
+      const { data: teachers, error: teacherNamesError } = await supabase
+        .from("profiles")
+        .select("id, nama")
+        .in("id", teacherIds);
+      if (teacherNamesError) setBtqError(`Gagal memuat nama pembimbing: ${teacherNamesError.message}`);
+      else setBtqGroupTeacherNames((teachers ?? []).map((row) => row.nama).filter(Boolean));
+    }
+    setBtqGroupLoading(false);
+  };
+
+  const saveBtqGroupMembers = async () => {
+    if (role !== "Admin" || !selectedBtqGroupId) return;
+    setBtqGroupSaving(true);
+    setBtqError("");
+    const { data: existingRows, error: existingError } = await supabase
+      .from("btq_group_members").select("student_id").eq("group_id", selectedBtqGroupId);
+    if (existingError) {
+      setBtqError(`Gagal memeriksa anggota lama: ${existingError.message}`);
+      setBtqGroupSaving(false);
+      return;
+    }
+    const existingIds = (existingRows ?? []).map((row) => row.student_id);
+    const toAdd = btqSelectedMemberIds.filter((id) => !existingIds.includes(id));
+    const toRemove = existingIds.filter((id) => !btqSelectedMemberIds.includes(id));
+
+    if (toAdd.length) {
+      const { error } = await supabase.from("btq_group_members").insert(
+        toAdd.map((student_id) => ({ group_id: selectedBtqGroupId, student_id }))
+      );
+      if (error) {
+        setBtqError(`Anggota baru gagal disimpan: ${error.message}`);
+        setBtqGroupSaving(false);
+        return;
+      }
+    }
+    if (toRemove.length) {
+      const { error } = await supabase.from("btq_group_members")
+        .delete().eq("group_id", selectedBtqGroupId).in("student_id", toRemove);
+      if (error) {
+        setBtqError(`Anggota yang dilepas gagal diperbarui: ${error.message}`);
+        setBtqGroupSaving(false);
+        return;
+      }
+    }
+    await loadBtqGroupMembers(selectedBtqGroupId);
+    setBtqGroupSaving(false);
+    alert("Anggota kelompok BTQ berhasil disimpan.");
+  };
+
+  const loadProgramSchoolStudents = async (classId = selectedGradeClassId) => {
+    setProgramSchoolStudentsLoading(true);
+    setProgramSchoolStudentsError("");
+    setProgramSchoolStudents([]);
+    setSelectedTahfidzStudentId("");
+    setSelectedBtqStudentId("");
+    setTahfidzSetoranRows([]);
+    setBtqAssessments([]);
+    if (!classId) {
+      setProgramSchoolStudentsLoading(false);
+      return;
+    }
+
+    let query = supabase
+      .from("students")
+      .select("id, nama, nis")
+      .eq("class_id", classId)
+      .eq("status", "aktif")
+      .order("nama", { ascending: true });
+
+    if (role === "Siswa") {
+      query = query.eq("user_id", currentUserId);
+    } else if (role === "Orang Tua") {
+      const { data: links, error: linksError } = await supabase
+        .from("parent_students")
+        .select("student_id")
+        .eq("parent_id", currentUserId);
+      if (linksError) {
+        setProgramSchoolStudentsError(`Gagal memuat data anak: ${linksError.message}`);
+        setProgramSchoolStudentsLoading(false);
+        return;
+      }
+      const childIds = (links ?? []).map((item) => item.student_id).filter(Boolean);
+      if (!childIds.length) {
+        setProgramSchoolStudentsLoading(false);
+        return;
+      }
+      query = query.in("id", childIds);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      setProgramSchoolStudentsError(`Gagal memuat daftar siswa: ${error.message}`);
+    } else {
+      setProgramSchoolStudents((data ?? []).map((item) => ({
+        id: item.id,
+        name: item.nama,
+        nis: item.nis ?? "",
+      })));
+    }
+    setProgramSchoolStudentsLoading(false);
+  };
+
+  const loadProgramAcademicGrade = async (program: "BTQ" | "Tahfidz", classId: string, studentId: string, semesterValue = selectedSemester) => {
+    if (!classId || !studentId) return;
+    // BTQ memakai penugasan kelompok (btq_group_teachers), bukan teaching_assignments.
+    // Karena itu, cari mapel BTQ langsung dari tabel subjects agar tidak terhalang
+    // filter gradeSubjects yang memang hanya menampilkan mapel reguler guru.
+    let subject: { id: string; name: string } | undefined;
+    if (program === "BTQ") {
+      const { data: btqSubject, error: btqSubjectError } = await supabase
+        .from("subjects")
+        .select("id, nama, kode")
+        .eq("kode", "BTQ")
+        .maybeSingle();
+      if (btqSubjectError) {
+        setGradeError(`Gagal memeriksa mata pelajaran BTQ: ${btqSubjectError.message}`);
+        return;
+      }
+      if (btqSubject) subject = { id: btqSubject.id, name: btqSubject.nama };
+    } else {
+      const found = gradeSubjects.find((item) => {
+        const normalized = normalizeReportSubjectName(item.name);
+        return normalized === "tahfidz" || normalized === "tahfiz";
+      });
+      if (found) subject = { id: found.id, name: found.name };
+    }
+    if (!subject) {
+      setGradeError(`Mata pelajaran ${program} belum terdaftar di data Mata Pelajaran.`);
+      return;
+    }
+    setSelectedGradeSubjectId(subject.id);
+    setGradeError("");
+    const selectedBtqMember = program === "BTQ"
+      ? btqGroupStudents.find((student) => student.id === studentId)
+      : undefined;
+    const targetClassId = selectedBtqMember?.class_id ?? classId;
+    const tahunAjaran = program === "BTQ"
+      ? selectedBtqMember?.tahun_ajaran ?? "2026/2027"
+      : gradeClasses.find((item) => item.id === targetClassId)?.tahunAjaran ?? "2026/2027";
+    const { data, error } = await supabase.from("grades")
+      .select("id, nilai_non_tes, nilai_uts_pts, nilai_sas, nilai_akhir")
+      .eq("student_id", studentId).eq("class_id", targetClassId).eq("subject_id", subject.id)
+      .eq("semester", Number(semesterValue)).eq("tahun_ajaran", tahunAjaran).maybeSingle();
+    if (error) { setGradeError(`Gagal memuat nilai ${program}: ${error.message}`); return; }
+    setGradeDrafts((current) => ({ ...current, [studentId]: {
+      ...emptyGradeDraft(studentId), ...(current[studentId] ?? {}),
+      id: data?.id, studentId,
+      nilaiNonTes: data?.nilai_non_tes == null ? "" : String(data.nilai_non_tes),
+      nilaiUtsPts: data?.nilai_uts_pts == null ? "" : String(data.nilai_uts_pts),
+      nilaiSas: data?.nilai_sas == null ? "" : String(data.nilai_sas),
+      nilaiAkhir: data?.nilai_akhir == null ? "" : String(data.nilai_akhir),
+    }}));
+  };
+
+  const updateProgramAcademicDraft = (studentId: string, key: "nilaiNonTes" | "nilaiUtsPts" | "nilaiSas" | "nilaiAkhir", value: string) => {
+    setGradeDrafts((current) => ({ ...current, [studentId]: { ...(current[studentId] ?? emptyGradeDraft(studentId)), [key]: value } }));
+    setGradeSaved(false);
+  };
+
+  const saveProgramAcademicGrade = async (program: "BTQ" | "Tahfidz") => {
+    const studentId = program === "BTQ" ? selectedBtqStudentId : selectedTahfidzStudentId;
+    // Untuk BTQ, ambil ID mapel langsung dari subjects. Jangan bergantung pada
+    // gradeSubjects karena daftar itu difilter berdasarkan teaching_assignments.
+    let subject: { id: string; name: string } | undefined;
+    if (program === "BTQ") {
+      const { data: btqSubject, error: btqSubjectError } = await supabase
+        .from("subjects")
+        .select("id, nama, kode")
+        .eq("kode", "BTQ")
+        .maybeSingle();
+      if (btqSubjectError) {
+        setGradeError(`Gagal memeriksa mata pelajaran BTQ: ${btqSubjectError.message}`);
+        return;
+      }
+      if (btqSubject) subject = { id: btqSubject.id, name: btqSubject.nama };
+    } else {
+      const found = gradeSubjects.find((item) => {
+        const normalized = normalizeReportSubjectName(item.name);
+        return normalized === "tahfidz" || normalized === "tahfiz";
+      });
+      if (found) subject = { id: found.id, name: found.name };
+    }
+    const selectedBtqMember = program === "BTQ"
+      ? btqGroupStudents.find((student) => student.id === studentId)
+      : undefined;
+    const targetClassId = selectedBtqMember?.class_id ?? selectedGradeClassId;
+    if (program === "Tahfidz" && !canEditTahfidz) {
+      setGradeError("Akun ini tidak memiliki akses untuk mengisi nilai Tahfidz."); return;
+    }
+    if (!canEditGrades || !currentUserId || !targetClassId || !studentId || !subject) {
+      setGradeError(`Pilih kelompok dan siswa ${program} terlebih dahulu, serta pastikan mata pelajarannya tersedia.`); return;
+    }
+    if (program === "Tahfidz" && role === "Guru" && !isGuruPiket && !teacherAssignments.some((assignment) => assignment.classId === targetClassId && assignment.subjectId === subject.id)) {
+      setGradeError(`Anda belum memiliki penugasan Tahfidz untuk kelas ini.`); return;
+    }
+    const draft = gradeDrafts[studentId] ?? emptyGradeDraft(studentId);
+    const values = [draft.nilaiNonTes, draft.nilaiUtsPts, draft.nilaiSas, draft.nilaiAkhir].map((v) => v === "" ? null : Number(v));
+    if (values.some((v) => v !== null && (!Number.isFinite(v) || v < 0 || v > 100))) { setGradeError("Semua nilai harus berada pada rentang 0–100."); return; }
+    const tahunAjaran = program === "BTQ"
+      ? selectedBtqMember?.tahun_ajaran ?? "2026/2027"
+      : gradeClasses.find((item) => item.id === targetClassId)?.tahunAjaran ?? "2026/2027";
+    setGradeSaving(true); setGradeError(""); setGradeSaved(false);
+    const { error } = await supabase.from("grades").upsert({
+      student_id: studentId, teacher_id: currentUserId, subject_id: subject.id, class_id: targetClassId,
+      nilai: values[3] ?? 0, nilai_non_tes: values[0], nilai_uts_pts: values[1], nilai_sas: values[2], nilai_akhir: values[3],
+      semester: Number(selectedSemester), tahun_ajaran: tahunAjaran,
+    }, { onConflict: "student_id,subject_id,class_id,semester,tahun_ajaran" });
+    setGradeSaving(false);
+    if (error) { setGradeError(`Gagal menyimpan nilai ${program}: ${error.message}`); return; }
+    setGradeSaved(true);
+    await loadProgramAcademicGrade(program, targetClassId, studentId, selectedSemester);
+  };
+
+  const loadBtqAssessments = async (studentId: string, semesterValue = selectedSemester) => {
+    setSelectedBtqStudentId(studentId);
+    setBtqError("");
+    setBtqAssessments([]);
+    if (!studentId) return;
+    setBtqLoading(true);
+    const schoolYear = btqGroupStudents.find((student) => student.id === studentId)?.tahun_ajaran ?? "2026/2027";
+    const { data, error } = await supabase
+      .from("btq_assessments")
+      .select("id, tanggal, makhraj, panjang_pendek, kelancaran, catatan")
+      .eq("student_id", studentId)
+      .eq("semester", Number(semesterValue))
+      .eq("tahun_ajaran", schoolYear)
+      .order("tanggal", { ascending: false });
+    if (error) {
+      setBtqError(`Gagal memuat penilaian BTQ: ${error.message}. Pastikan SQL tabel BTQ sudah dijalankan.`);
+    } else {
+      setBtqAssessments(data ?? []);
+    }
+    setBtqLoading(false);
+  };
+
+  const saveBtqAssessment = async () => {
+    const selectedMember = btqGroupStudents.find((student) => student.id === selectedBtqStudentId);
+    if (!canEditGrades || !selectedBtqGroupId || !selectedMember?.class_id || !currentUserId) {
+      alert("Pilih kelompok dan siswa BTQ terlebih dahulu.");
+      return;
+    }
+    if (!btqForm.tanggal) {
+      alert("Tanggal penilaian wajib diisi.");
+      return;
+    }
+    const schoolYear = selectedMember.tahun_ajaran ?? "2026/2027";
+    setBtqSaving(true);
+    setBtqError("");
+    const { error } = await supabase.from("btq_assessments").insert({
+      student_id: selectedBtqStudentId,
+      class_id: selectedMember.class_id,
+      teacher_id: currentUserId,
+      tanggal: btqForm.tanggal,
+      makhraj: btqForm.makhraj,
+      panjang_pendek: btqForm.panjangPendek,
+      kelancaran: btqForm.kelancaran,
+      catatan: btqForm.catatan.trim() || null,
+      semester: Number(selectedSemester),
+      tahun_ajaran: schoolYear,
+    });
+    setBtqSaving(false);
+    if (error) {
+      setBtqError(`Penilaian BTQ gagal disimpan: ${error.message}`);
+      return;
+    }
+    setBtqForm((current) => ({ ...current, tanggal: new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" }), catatan: "" }));
+    await loadBtqAssessments(selectedBtqStudentId);
+  };
+
+  const deleteBtqAssessment = async (id: string) => {
+    if (role !== "Admin" || !window.confirm("Hapus penilaian BTQ ini?")) return;
+    const { error } = await supabase.from("btq_assessments").delete().eq("id", id);
+    if (error) {
+      setBtqError(`Penilaian BTQ gagal dihapus: ${error.message}`);
+      return;
+    }
+    await loadBtqAssessments(selectedBtqStudentId);
   };
 
   const updateGradeDraft = (studentId: string, patch: Partial<GradeDraft>) => {
@@ -5894,6 +6308,49 @@ export default function Home() {
     setNavigationLoading(true);
     setActiveMenu(menuName);
     if (menuName === "Nilai") setGradeTab("input");
+    if (menuName === "BTQ") {
+      setBtqError("");
+      void loadBtqGroups();
+    }
+    if (menuName === "Tahfidz") {
+      if (role !== "Admin" && !(role === "Guru" && (isGuruPiket || isAssignedTahfidzTeacher))) {
+        setNavigationLoading(false);
+        setActiveMenu("Dashboard");
+        alert("Menu Tahfidz hanya dapat diakses Admin, Guru Tahfidz, dan Guru Piket.");
+        return;
+      }
+      setProgramSchoolStudentsError("");
+      let options: GradeClass[] = [];
+      if (role === "Admin") {
+        options = gradeClasses;
+      } else if (isGuruPiket) {
+        const { data: classRows, error: classError } = await supabase
+          .from("classes")
+          .select("id, nama, tahun_ajaran")
+          .order("nama", { ascending: true });
+        if (classError) {
+          setProgramSchoolStudentsError(`Gagal memuat kelas untuk Guru Piket: ${classError.message}`);
+        } else {
+          options = (classRows ?? []).map((item: any) => ({ id: item.id, nama: item.nama, tahunAjaran: item.tahun_ajaran ?? "2026/2027" }));
+        }
+      } else {
+        const allowedClassIds = Array.from(new Set(teacherAssignments
+          .filter((item) => item.subjectId && (normalizeReportSubjectName(item.subjectName) === "tahfidz" || normalizeReportSubjectName(item.subjectName) === "tahfiz" || String(item.subjectCode ?? "").toUpperCase() === "TAHFIDZ"))
+          .map((item) => item.classId).filter(Boolean)));
+        options = gradeClasses.filter((item) => allowedClassIds.includes(item.id));
+      }
+      setTahfidzClassOptions(options);
+      const programClassId = options.some((item) => item.id === selectedGradeClassId)
+        ? selectedGradeClassId
+        : options[0]?.id ?? "";
+      if (programClassId) {
+        setSelectedGradeClassId(programClassId);
+        void loadProgramSchoolStudents(programClassId);
+      } else {
+        setProgramSchoolStudents([]);
+        setProgramSchoolStudentsError("Belum ada kelas Tahfidz yang tersedia untuk akun ini.");
+      }
+    }
     if (menuName === "Rapor") {
       setGradeTab("raport");
       setReportDraft(null);
@@ -7436,6 +7893,119 @@ if (!loggedIn) {
             </Section>
           )}
 
+          {activeMenu === "Tahfidz" && canAccessTahfidz && (
+            <Section title="Tahfidz" subtitle="Pencatatan setoran dan perkembangan hafalan Al-Qur’an siswa">
+              <div className="mb-6 grid gap-4 md:grid-cols-3">
+                <label className="block text-sm font-semibold text-gray-700">Pilih Kelas
+                  <select value={selectedGradeClassId} onChange={(e) => { const id = e.target.value; setSelectedGradeClassId(id); void loadProgramSchoolStudents(id); }} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 disabled:bg-gray-50">
+                    <option value="">Pilih kelas</option>
+                    {tahfidzClassOptions.map((item) => <option key={item.id} value={item.id}>{item.nama}</option>)}
+                  </select>
+                </label>
+                <label className="block text-sm font-semibold text-gray-700">Semester
+                  <select value={selectedSemester} onChange={(e) => { setSelectedSemester(e.target.value); if (selectedTahfidzStudentId) { void loadTahfidzSetoran(selectedTahfidzStudentId, e.target.value); void loadProgramAcademicGrade("Tahfidz", selectedGradeClassId, selectedTahfidzStudentId, e.target.value); } }} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-4 py-3"><option value="1">Semester 1</option><option value="2">Semester 2</option></select>
+                </label>
+                <label className="block text-sm font-semibold text-gray-700">Pilih Siswa
+                  <select value={selectedTahfidzStudentId} onChange={(e) => { const id = e.target.value; setSelectedTahfidzStudentId(id); setTahfidzStudentSearch(programSchoolStudents.find((st) => st.id === id)?.name ?? ""); void loadTahfidzSetoran(id); void loadProgramAcademicGrade("Tahfidz", selectedGradeClassId, id); }} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-4 py-3"><option value="">Pilih siswa</option>{programSchoolStudents.map((st) => <option key={st.id} value={st.id}>{st.name} {st.nis ? `— ${st.nis}` : ""}</option>)}</select>
+                </label>
+              </div>
+              {programSchoolStudentsLoading && <p className="mb-4 rounded-xl bg-gray-50 p-4 text-sm text-gray-500">Memuat daftar siswa...</p>}
+              {programSchoolStudentsError && <p className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{programSchoolStudentsError}</p>}
+              {tahfidzSetoranError && <p className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{tahfidzSetoranError}</p>}
+              {selectedTahfidzStudentId ? (
+                <div className="space-y-5">
+                  <section className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+                    <h3 className="font-bold text-gray-900">Tambah Setoran Hafalan</h3>
+                    <p className="mt-1 text-sm text-gray-500">Data disimpan pada tabel tahfidz_setoran yang sudah digunakan portal.</p>
+                    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      <label className="text-xs font-semibold text-gray-600">Tanggal<input type="date" value={tahfidzSetoranForm.tanggal} disabled={!canEditTahfidz} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, tanggal: e.target.value }))} className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" /></label>
+                      <label className="text-xs font-semibold text-gray-600">Nama Surat<input list="tahfidz-surat-options-standalone" value={tahfidzSetoranForm.namaSurat} disabled={!canEditTahfidz} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, namaSurat: e.target.value }))} placeholder="Cari atau ketik nama surat" className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" /><datalist id="tahfidz-surat-options-standalone">{["An-Naba", "An-Nazi'at", "'Abasa", "At-Takwir", "Al-Infitar", "Al-Mutaffifin", "Al-Insyiqaq", "Al-Buruj", "At-Tariq", "Al-A'la", "Al-Ghasyiyah", "Al-Fajr", "Al-Balad", "Asy-Syams", "Al-Lail", "Ad-Duha", "Asy-Syarh", "At-Tin", "Al-'Alaq", "Al-Qadr", "Al-Bayyinah", "Az-Zalzalah", "Al-'Adiyat", "Al-Qari'ah", "At-Takasur", "Al-'Asr", "Al-Humazah", "Al-Fil", "Quraisy", "Al-Ma'un", "Al-Kausar", "Al-Kafirun", "An-Nasr", "Al-Lahab", "Al-Ikhlas", "Al-Falaq", "An-Nas"].map((surat) => <option key={surat} value={surat} />)}</datalist></label>
+                      <label className="text-xs font-semibold text-gray-600">Status<select value={tahfidzSetoranForm.status} disabled={!canEditTahfidz} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, status: e.target.value as "Tuntas" | "Ulang" }))} className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm"><option value="Tuntas">Tuntas</option><option value="Ulang">Ulang</option></select></label>
+                      <label className="text-xs font-semibold text-gray-600">Nilai Angka<input type="number" min="0" max="100" value={tahfidzSetoranForm.nilai} disabled={!canEditTahfidz} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, nilai: e.target.value }))} className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" placeholder="0–100" /></label>
+                      <label className="text-xs font-semibold text-gray-600">Predikat<input value={tahfidzSetoranForm.predikat} disabled={!canEditTahfidz} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, predikat: e.target.value }))} placeholder="Contoh: A" className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" /></label>
+                      <label className="text-xs font-semibold text-gray-600">Catatan Guru<textarea rows={2} value={tahfidzSetoranForm.catatan} disabled={!canEditTahfidz} onChange={(e) => setTahfidzSetoranForm((v) => ({ ...v, catatan: e.target.value }))} placeholder="Catatan kelancaran hafalan dan tajwid..." className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" /></label>
+                    </div>
+                    {canEditTahfidz && <button type="button" onClick={saveTahfidzSetoran} disabled={tahfidzSetoranSaving} className="mt-4 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white disabled:opacity-50">{tahfidzSetoranSaving ? "Menyimpan..." : "Simpan Setoran"}</button>}
+                  </section>
+                  <section className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm"><div className="p-5"><h3 className="font-bold text-gray-900">Riwayat Setoran Hafalan</h3></div>
+                    <table className="w-full min-w-[850px] text-left text-sm"><thead className="bg-emerald-700 text-white"><tr><th className="px-3 py-3">Tanggal</th><th className="px-3 py-3">Nama Surat</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Nilai</th><th className="px-3 py-3">Predikat</th><th className="px-3 py-3">Catatan</th>{canEditTahfidz && <th className="px-3 py-3">Aksi</th>}</tr></thead><tbody>{tahfidzSetoranRows.length ? tahfidzSetoranRows.map((row) => <tr key={row.id} className="border-t align-top"><td className="whitespace-nowrap px-3 py-3">{row.tanggal}</td><td className="px-3 py-3 font-semibold">{row.nama_surat}</td><td className="px-3 py-3">{row.status}</td><td className="px-3 py-3">{row.nilai ?? "-"}</td><td className="px-3 py-3">{row.predikat ?? "-"}</td><td className="max-w-sm whitespace-pre-wrap px-3 py-3">{row.catatan || "-"}</td>{canEditTahfidz && <td className="px-3 py-3"><button type="button" onClick={() => deleteTahfidzSetoran(row.id)} className="font-semibold text-red-600">Hapus</button></td>}</tr>) : <tr><td colSpan={canEditTahfidz ? 7 : 6} className="px-3 py-6 text-center text-gray-500">Belum ada riwayat setoran untuk siswa ini.</td></tr>}</tbody></table>
+                  </section>
+                  <section className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm">
+                    <h3 className="font-bold text-gray-900">Penilaian Akademik Tahfidz</h3>
+                    <p className="mt-1 text-sm text-gray-500">Nilai tersinkron ke Rapor Madin berdasarkan kelas reguler masing-masing siswa, bukan berdasarkan kelompok BTQ.</p>
+                    {gradeError && <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{gradeError}</p>}
+                    {gradeSaved && <p className="mt-3 text-sm font-semibold text-emerald-700">Nilai berhasil disimpan dan disinkronkan.</p>}
+                    {(() => { const d = gradeDrafts[selectedTahfidzStudentId] ?? emptyGradeDraft(selectedTahfidzStudentId); return <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">{([ ["nilaiNonTes","Non-Tes"], ["nilaiUtsPts","STS"], ["nilaiSas","SAS"], ["nilaiAkhir","Nilai Akhir"] ] as const).map(([key,label]) => <label key={key} className="text-xs font-semibold text-gray-600">{label}<input type="number" min="0" max="100" value={d[key]} disabled={!canEditTahfidz} onChange={(e) => updateProgramAcademicDraft(selectedTahfidzStudentId,key,e.target.value)} placeholder="0–100" className="mt-1 w-full rounded-lg border px-3 py-2.5 text-sm" /></label>)}</div>; })()}
+                    {canEditTahfidz && <button type="button" onClick={() => void saveProgramAcademicGrade("Tahfidz")} disabled={gradeSaving} className="mt-4 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white disabled:opacity-50">{gradeSaving ? "Menyimpan..." : "Simpan Penilaian Tahfidz"}</button>}
+                  </section>
+                </div>
+              ) : <p className="rounded-xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">Pilih kelas dan siswa untuk mulai mengisi setoran Tahfidz.</p>}
+            </Section>
+          )}
+
+          {activeMenu === "BTQ" && (
+            <Section title="BTQ" subtitle="Penilaian kemampuan membaca Al-Qur’an siswa">
+              <div className="mb-6 grid gap-4 md:grid-cols-3">
+                <label className="block text-sm font-semibold text-gray-700">Pilih Kelompok BTQ
+                  <select value={selectedBtqGroupId} onChange={(e) => void loadBtqGroupMembers(e.target.value)} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-4 py-3">
+                    <option value="">Pilih kelompok</option>
+                    {btqGroups.map((group) => <option key={group.id} value={group.id}>{group.nama}</option>)}
+                  </select>
+                </label>
+                <label className="block text-sm font-semibold text-gray-700">Semester
+                  <select value={selectedSemester} onChange={(e) => { setSelectedSemester(e.target.value); if (selectedBtqStudentId) { void loadBtqAssessments(selectedBtqStudentId, e.target.value); const studentClassId = btqGroupStudents.find((student) => student.id === selectedBtqStudentId)?.class_id; if (studentClassId) void loadProgramAcademicGrade("BTQ", studentClassId, selectedBtqStudentId, e.target.value); } }} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-4 py-3">
+                    <option value="1">Semester 1</option><option value="2">Semester 2</option>
+                  </select>
+                </label>
+                <label className="block text-sm font-semibold text-gray-700">Pilih Siswa
+                  <select value={selectedBtqStudentId} onChange={(e) => { const student = btqGroupStudents.find((item) => item.id === e.target.value); setSelectedBtqStudentId(e.target.value); if (student?.class_id) { setSelectedGradeClassId(student.class_id); void loadBtqAssessments(e.target.value); void loadProgramAcademicGrade("BTQ", student.class_id, e.target.value); } else { setBtqAssessments([]); } }} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-4 py-3">
+                    <option value="">Pilih siswa</option>{btqGroupStudents.map((st) => <option key={st.id} value={st.id}>{st.nama} {st.nis ? `— ${st.nis}` : ""}</option>)}
+                  </select>
+                </label>
+              </div>
+              {role === "Admin" && selectedBtqGroupId && <section className="mb-6 rounded-2xl border border-blue-100 bg-blue-50/50 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div><h3 className="font-bold text-gray-900">Pengaturan Anggota Kelompok</h3><p className="mt-1 text-sm text-gray-600">Centang siswa yang menjadi anggota kelompok. Perubahan hanya berlaku pada kelompok yang dipilih.</p></div>
+                  <button type="button" onClick={saveBtqGroupMembers} disabled={btqGroupSaving || btqGroupLoading} className="rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50">{btqGroupSaving ? "Menyimpan..." : "Simpan Anggota"}</button>
+                </div>
+                <p className="mt-3 text-sm text-gray-700"><strong>Pembimbing:</strong> {btqGroupTeacherNames.length ? btqGroupTeacherNames.join(", ") : "Belum ada penugasan pembimbing"}</p>
+                <div className="mt-4 max-h-72 space-y-2 overflow-y-auto rounded-xl border border-gray-200 bg-white p-3">
+                  {btqAvailableStudents.map((student) => <label key={student.id} className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-sm hover:bg-gray-50">
+                    <input type="checkbox" checked={btqSelectedMemberIds.includes(student.id)} onChange={(e) => setBtqSelectedMemberIds((current) => e.target.checked ? [...current, student.id] : current.filter((id) => id !== student.id))} />
+                    <span className="min-w-0 flex-1"><span className="block font-semibold text-gray-800">{student.nama}</span><span className="text-xs text-gray-500">{student.nis || "Tanpa NIS"} · {gradeClasses.find((item) => item.id === student.class_id)?.nama || "Kelas belum ditentukan"}</span></span>
+                  </label>)}
+                  {!btqAvailableStudents.length && <p className="p-3 text-center text-sm text-gray-500">Tidak ada siswa aktif yang dapat ditampilkan.</p>}
+                </div>
+                <p className="mt-2 text-xs text-gray-500">{btqSelectedMemberIds.length} siswa dipilih. Penugasan pembimbing yang sudah ada tidak diubah.</p>
+              </section>}
+              {btqGroupLoading && <p className="mb-4 rounded-xl bg-gray-50 p-4 text-sm text-gray-500">Memuat kelompok dan anggota BTQ...</p>}
+              {role === "Guru" && !btqGroups.length && !btqGroupLoading && <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">Belum ada kelompok BTQ yang ditugaskan ke akun Guru ini.</p>}
+              {btqError && <p className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{btqError}</p>}
+              {selectedBtqStudentId ? <div className="space-y-5">
+                <section className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm"><h3 className="font-bold text-gray-900">Form Penilaian BTQ</h3><p className="mt-1 text-sm text-gray-500">Penilaian terdiri dari tiga aspek dan catatan guru.</p>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <label className="text-xs font-semibold text-gray-600">Tanggal<input type="date" value={btqForm.tanggal} disabled={!canEditGrades} onChange={(e) => setBtqForm((v) => ({ ...v, tanggal: e.target.value }))} className="mt-1 w-full rounded-lg border px-3 py-2.5 text-sm" /></label>
+                    <label className="text-xs font-semibold text-gray-600">Makhraj<select value={btqForm.makhraj} disabled={!canEditGrades} onChange={(e) => setBtqForm((v) => ({ ...v, makhraj: e.target.value }))} className="mt-1 w-full rounded-lg border px-3 py-2.5 text-sm">{["Sangat Baik", "Baik", "Cukup", "Perlu Bimbingan"].map((v) => <option key={v} value={v}>{v}</option>)}</select></label>
+                    <label className="text-xs font-semibold text-gray-600">Ketepatan Panjang-Pendek Bacaan<select value={btqForm.panjangPendek} disabled={!canEditGrades} onChange={(e) => setBtqForm((v) => ({ ...v, panjangPendek: e.target.value }))} className="mt-1 w-full rounded-lg border px-3 py-2.5 text-sm">{["Sangat Baik", "Baik", "Cukup", "Perlu Bimbingan"].map((v) => <option key={v} value={v}>{v}</option>)}</select></label>
+                    <label className="text-xs font-semibold text-gray-600">Kelancaran<select value={btqForm.kelancaran} disabled={!canEditGrades} onChange={(e) => setBtqForm((v) => ({ ...v, kelancaran: e.target.value }))} className="mt-1 w-full rounded-lg border px-3 py-2.5 text-sm">{["Terbata-bata", "Cukup lancar", "Lancar"].map((v) => <option key={v} value={v}>{v}</option>)}</select></label>
+                    <label className="text-xs font-semibold text-gray-600 md:col-span-2">Catatan Guru<textarea rows={3} value={btqForm.catatan} disabled={!canEditGrades} onChange={(e) => setBtqForm((v) => ({ ...v, catatan: e.target.value }))} placeholder="Catatan dan arahan latihan untuk siswa..." className="mt-1 w-full rounded-lg border px-3 py-2.5 text-sm" /></label>
+                  </div>
+                  {canEditGrades && <button type="button" onClick={saveBtqAssessment} disabled={btqSaving} className="mt-4 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white disabled:opacity-50">{btqSaving ? "Menyimpan..." : "Simpan Penilaian BTQ"}</button>}
+                </section>
+                <section className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm"><div className="p-5"><h3 className="font-bold text-gray-900">Riwayat Penilaian BTQ</h3></div><table className="w-full min-w-[800px] text-left text-sm"><thead className="bg-emerald-700 text-white"><tr><th className="px-3 py-3">Tanggal</th><th className="px-3 py-3">Makhraj</th><th className="px-3 py-3">Panjang-Pendek</th><th className="px-3 py-3">Kelancaran</th><th className="px-3 py-3">Catatan Guru</th>{role === "Admin" && <th className="px-3 py-3">Aksi</th>}</tr></thead><tbody>{btqAssessments.length ? btqAssessments.map((row) => <tr key={row.id} className="border-t align-top"><td className="px-3 py-3">{row.tanggal}</td><td className="px-3 py-3">{row.makhraj}</td><td className="px-3 py-3">{row.panjang_pendek}</td><td className="px-3 py-3">{row.kelancaran}</td><td className="max-w-sm whitespace-pre-wrap px-3 py-3">{row.catatan || "-"}</td>{role === "Admin" && <td className="px-3 py-3"><button type="button" onClick={() => deleteBtqAssessment(row.id)} className="font-semibold text-red-600">Hapus</button></td>}</tr>) : <tr><td colSpan={role === "Admin" ? 6 : 5} className="px-3 py-6 text-center text-gray-500">Belum ada riwayat penilaian BTQ.</td></tr>}</tbody></table></section>
+                {btqLoading && <p className="text-sm text-gray-500">Memuat riwayat penilaian BTQ...</p>}
+                <section className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm">
+                  <h3 className="font-bold text-gray-900">Penilaian Akademik BTQ</h3>
+                  <p className="mt-1 text-sm text-gray-500">Nilai tersinkron ke Rapor Madin untuk siswa, kelas, dan semester terpilih. Rumus Nilai Akhir dapat ditentukan kemudian.</p>
+                  {gradeError && <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{gradeError}</p>}
+                  {gradeSaved && <p className="mt-3 text-sm font-semibold text-emerald-700">Nilai berhasil disimpan dan disinkronkan.</p>}
+                  {(() => { const d = gradeDrafts[selectedBtqStudentId] ?? emptyGradeDraft(selectedBtqStudentId); return <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">{([ ["nilaiNonTes","Non-Tes"], ["nilaiUtsPts","STS"], ["nilaiSas","SAS"], ["nilaiAkhir","Nilai Akhir"] ] as const).map(([key,label]) => <label key={key} className="text-xs font-semibold text-gray-600">{label}<input type="number" min="0" max="100" value={d[key]} disabled={!canEditGrades} onChange={(e) => updateProgramAcademicDraft(selectedBtqStudentId,key,e.target.value)} placeholder="0–100" className="mt-1 w-full rounded-lg border px-3 py-2.5 text-sm" /></label>)}</div>; })()}
+                  {canEditGrades && <button type="button" onClick={() => void saveProgramAcademicGrade("BTQ")} disabled={gradeSaving} className="mt-4 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white disabled:opacity-50">{gradeSaving ? "Menyimpan..." : "Simpan Penilaian BTQ"}</button>}
+                </section>
+              </div> : <p className="rounded-xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">Pilih kelompok BTQ, kemudian pilih salah satu siswa anggotanya untuk mulai mengisi penilaian.</p>}
+            </Section>
+          )}
+
           {(activeMenu === "Nilai" || activeMenu === "Rapor") && (
             <Section
               title={activeMenu}
@@ -7498,7 +8068,7 @@ if (!loggedIn) {
                           setTahfidzSetoranRows([]);
                           setGradeSaved(false);
                         }}
-                        disabled={role === "Siswa" || role === "Orang Tua"}
+                       
                         className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:bg-gray-50 disabled:text-gray-600"
                       >
                         <option value="">Pilih kelas</option>
@@ -7570,6 +8140,7 @@ if (!loggedIn) {
                     >
                       <option value="">Pilih mata pelajaran</option>
                       {gradeSubjects
+                        .filter((subject) => !normalizeReportSubjectName(subject.name).includes("tahfidz"))
                         .filter((subject) => {
                           if (role !== "Guru") return true;
                           const selectedClassName = gradeClasses.find((item) => item.id === selectedGradeClassId)?.nama ?? "";
