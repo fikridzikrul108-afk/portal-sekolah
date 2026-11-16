@@ -44,6 +44,16 @@ export const menuItems: { name: string; icon: string; roles: Role[] }[] = [
     roles: ["Admin", "Kepala Sekolah", "Guru", "Siswa", "Orang Tua"],
   },
   {
+    name: "BTQ",
+    icon: "journal",
+    roles: ["Admin", "Kepala Sekolah", "Guru", "Siswa", "Orang Tua"],
+  },
+  {
+    name: "Tahfidz",
+    icon: "report",
+    roles: ["Admin", "Kepala Sekolah", "Guru", "Siswa", "Orang Tua"],
+  },
+  {
     name: "Journal",
     icon: "journal",
     roles: ["Admin", "Kepala Sekolah", "Guru"],
@@ -84,6 +94,7 @@ export const menuItems: { name: string; icon: string; roles: Role[] }[] = [
 const SIDEBAR_GROUPS = [
   { label: "HOME", items: ["Profil Saya", "Dashboard"] },
   { label: "AKADEMIK", items: ["Data Siswa", "Data Guru", "Jadwal", "Kalender Akademik", "Nilai", "Rapor"] },
+  { label: "PROGRAM SEKOLAH", items: ["BTQ", "Tahfidz"] },
   { label: "PEMBELAJARAN", items: ["Journal", "Remedial & Pengayaan", "Program BK", "Absensi"] },
   { label: "ADMINISTRASI", items: ["SPP & Administrasi"] },
   { label: "SISTEM", items: ["Pusat Bantuan", "Pengaturan Sekolah"] },
